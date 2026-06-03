@@ -1,0 +1,179 @@
+#![no_std]
+
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, Address, Env, Vec,
+};
+
+#[contracttype]
+pub enum DataKey {
+    Admin,
+    Rules,
+    Blocklist,
+    MaxTransfer,
+    MinHoldingPeriod,
+    MaxHolders,
+    HolderCount,
+    HolderSince(Address),
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct ComplianceRules {
+    pub max_transfer_amount: i128,  // 0 = unlimited
+    pub min_holding_period: u64,    // seconds; 0 = none
+    pub max_holders: u32,           // 0 = unlimited
+    pub require_same_jurisdiction: bool,
+    pub paused: bool,
+}
+
+const DAY_IN_LEDGERS: u32 = 17280;
+const BUMP: u32 = 30 * DAY_IN_LEDGERS;
+const THRESHOLD: u32 = BUMP - DAY_IN_LEDGERS;
+
+#[contract]
+pub struct ComplianceEngine;
+
+#[contractimpl]
+impl ComplianceEngine {
+    pub fn initialize(env: Env, admin: Address) {
+        if env.storage().instance().has(&DataKey::Admin) {
+            panic!("already initialized");
+        }
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        let default_rules = ComplianceRules {
+            max_transfer_amount: 0,
+            min_holding_period: 0,
+            max_holders: 0,
+            require_same_jurisdiction: false,
+            paused: false,
+        };
+        env.storage().instance().set(&DataKey::Rules, &default_rules);
+        env.storage().instance().set(&DataKey::HolderCount, &0u32);
+    }
+
+    // ── Rule management ──────────────────────────────────────────────────────
+
+    pub fn set_rules(env: Env, rules: ComplianceRules) {
+        Self::require_admin(&env);
+        env.storage().instance().set(&DataKey::Rules, &rules);
+        env.events().publish((symbol_short!("rules_set"),), ());
+    }
+
+    pub fn get_rules(env: Env) -> ComplianceRules {
+        env.storage().instance().get(&DataKey::Rules).unwrap()
+    }
+
+    pub fn add_to_blocklist(env: Env, addr: Address) {
+        Self::require_admin(&env);
+        let mut list = Self::blocklist(&env);
+        if !list.contains(&addr) {
+            list.push_back(addr.clone());
+        }
+        env.storage().instance().set(&DataKey::Blocklist, &list);
+        env.events()
+            .publish((symbol_short!("blocked"),), addr);
+    }
+
+    pub fn remove_from_blocklist(env: Env, addr: Address) {
+        Self::require_admin(&env);
+        let list = Self::blocklist(&env);
+        let mut new_list: Vec<Address> = Vec::new(&env);
+        for a in list.iter() {
+            if a != addr {
+                new_list.push_back(a);
+            }
+        }
+        env.storage().instance().set(&DataKey::Blocklist, &new_list);
+    }
+
+    pub fn pause(env: Env) {
+        Self::require_admin(&env);
+        let mut rules: ComplianceRules = env.storage().instance().get(&DataKey::Rules).unwrap();
+        rules.paused = true;
+        env.storage().instance().set(&DataKey::Rules, &rules);
+        env.events().publish((symbol_short!("paused"),), ());
+    }
+
+    pub fn unpause(env: Env) {
+        Self::require_admin(&env);
+        let mut rules: ComplianceRules = env.storage().instance().get(&DataKey::Rules).unwrap();
+        rules.paused = false;
+        env.storage().instance().set(&DataKey::Rules, &rules);
+        env.events().publish((symbol_short!("unpaused"),), ());
+    }
+
+    // ── Transfer validation ──────────────────────────────────────────────────
+
+    /// Called by rwa-token before every transfer. Returns true if the
+    /// transfer is compliant with all configured rules.
+    pub fn can_transfer(env: Env, from: Address, to: Address, amount: i128) -> bool {
+        let rules: ComplianceRules = env.storage().instance().get(&DataKey::Rules).unwrap();
+
+        if rules.paused {
+            return false;
+        }
+
+        let blocklist = Self::blocklist(&env);
+        if blocklist.contains(&from) || blocklist.contains(&to) {
+            return false;
+        }
+
+        if rules.max_transfer_amount > 0 && amount > rules.max_transfer_amount {
+            return false;
+        }
+
+        if rules.min_holding_period > 0 {
+            let key = DataKey::HolderSince(from.clone());
+            if let Some(since) = env.storage().persistent().get::<DataKey, u64>(&key) {
+                let elapsed = env.ledger().timestamp().saturating_sub(since);
+                if elapsed < rules.min_holding_period {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
+    /// Called by rwa-token after a mint to register a new holder.
+    pub fn register_holder(env: Env, addr: Address) {
+        let key = DataKey::HolderSince(addr.clone());
+        if !env.storage().persistent().has(&key) {
+            env.storage()
+                .persistent()
+                .set(&key, &env.ledger().timestamp());
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, THRESHOLD, BUMP);
+            let count: u32 = env
+                .storage()
+                .instance()
+                .get(&DataKey::HolderCount)
+                .unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&DataKey::HolderCount, &(count + 1));
+        }
+    }
+
+    pub fn holder_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::HolderCount)
+            .unwrap_or(0)
+    }
+
+    // ── Internals ────────────────────────────────────────────────────────────
+
+    fn require_admin(env: &Env) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+    }
+
+    fn blocklist(env: &Env) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Blocklist)
+            .unwrap_or_else(|| Vec::new(env))
+    }
+}
