@@ -47,13 +47,9 @@ mod compliance_interface {
     use soroban_sdk::{contractclient, Address};
 
     #[contractclient(name = "ComplianceEngineClient")]
+    #[allow(dead_code)]
     pub trait ComplianceEngineInterface {
-        fn can_transfer(
-            env: soroban_sdk::Env,
-            from: Address,
-            to: Address,
-            amount: i128,
-        ) -> bool;
+        fn can_transfer(env: soroban_sdk::Env, from: Address, to: Address, amount: i128) -> bool;
     }
 }
 use compliance_interface::ComplianceEngineClient;

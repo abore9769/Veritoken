@@ -1,11 +1,12 @@
 import {
   isConnected,
-  getAddress,
+  getPublicKey,
   signTransaction,
   setAllowed,
 } from "@stellar/freighter-api";
 import { create } from "zustand";
 import type { WalletState } from "../types";
+import { NETWORK_PASSPHRASE } from "./stellar";
 
 interface WalletStore extends WalletState {
   connect: () => Promise<void>;
@@ -19,11 +20,11 @@ export const useWallet = create<WalletStore>((set, get) => ({
   connected: false,
 
   connect: async () => {
-    const connected = await isConnected();
-    if (!connected) {
-      await setAllowed();
+    if (!(await isConnected())) {
+      throw new Error("Freighter wallet is not installed or unavailable");
     }
-    const { address } = await getAddress();
+    await setAllowed();
+    const address = await getPublicKey();
     set({ address, connected: true });
   },
 
@@ -34,13 +35,6 @@ export const useWallet = create<WalletStore>((set, get) => ({
   signTx: async (xdr: string) => {
     const { address } = get();
     if (!address) throw new Error("Wallet not connected");
-    const result = await signTransaction(xdr, {
-      networkPassphrase:
-        import.meta.env.VITE_STELLAR_NETWORK === "mainnet"
-          ? "Public Global Stellar Network ; September 2015"
-          : "Test SDF Network ; September 2015",
-    });
-    if ("error" in result) throw new Error(result.error);
-    return result.signedTxXdr;
+    return signTransaction(xdr, { networkPassphrase: NETWORK_PASSPHRASE });
   },
 }));

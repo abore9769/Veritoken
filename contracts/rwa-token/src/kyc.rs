@@ -6,10 +6,7 @@ pub fn read_kyc_registry(env: &Env) -> Address {
     env.storage()
         .instance()
         .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
-    env.storage()
-        .instance()
-        .get(&DataKey::KycRegistry)
-        .unwrap()
+    env.storage().instance().get(&DataKey::KycRegistry).unwrap()
 }
 
 pub fn write_kyc_registry(env: &Env, registry: &Address) {
@@ -34,6 +31,7 @@ mod kyc_registry_interface {
     use soroban_sdk::{contractclient, Address};
 
     #[contractclient(name = "KycRegistryClient")]
+    #[allow(dead_code)]
     pub trait KycRegistryInterface {
         fn is_approved(env: soroban_sdk::Env, addr: Address) -> bool;
     }

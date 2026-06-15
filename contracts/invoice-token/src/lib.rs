@@ -4,9 +4,10 @@
 //! Each token unit represents 1 USD (7-decimal precision) of invoice face value.
 //! Adds invoice-specific metadata: issuer, debtor, due date, face value, discount rate.
 
-use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, Env, String,
-};
+#[cfg(test)]
+mod test;
+
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String};
 
 #[contracttype]
 pub enum DataKey {
@@ -25,11 +26,11 @@ pub struct InvoiceMeta {
     pub invoice_id: String,
     pub issuer: String,
     pub debtor: String,
-    pub face_value_usd: i128,    // in stroops (7 decimals)
-    pub discount_rate_bps: u32,  // basis points
-    pub due_date: u64,           // Unix timestamp
+    pub face_value_usd: i128,   // in stroops (7 decimals)
+    pub discount_rate_bps: u32, // basis points
+    pub due_date: u64,          // Unix timestamp
     pub currency: String,
-    pub ipfs_doc_hash: String,   // off-chain document anchor
+    pub ipfs_doc_hash: String, // off-chain document anchor
 }
 
 const DAY_IN_LEDGERS: u32 = 17280;
@@ -52,8 +53,12 @@ impl InvoiceToken {
             panic!("already initialized");
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::KycRegistry, &kyc_registry);
-        env.storage().instance().set(&DataKey::ComplianceEngine, &compliance_engine);
+        env.storage()
+            .instance()
+            .set(&DataKey::KycRegistry, &kyc_registry);
+        env.storage()
+            .instance()
+            .set(&DataKey::ComplianceEngine, &compliance_engine);
         env.storage().instance().set(&DataKey::InvoiceMeta, &meta);
         env.storage().instance().set(&DataKey::TotalSupply, &0i128);
         env.storage().instance().set(&DataKey::Settled, &false);
@@ -65,9 +70,15 @@ impl InvoiceToken {
         env.storage().instance().get(&DataKey::InvoiceMeta).unwrap()
     }
 
-    pub fn name(env: Env) -> String { String::from_str(&env, "Veritoken Invoice") }
-    pub fn symbol(env: Env) -> String { String::from_str(&env, "VTINV") }
-    pub fn decimals(_env: Env) -> u32 { 7 }
+    pub fn name(env: Env) -> String {
+        String::from_str(&env, "Veritoken Invoice")
+    }
+    pub fn symbol(env: Env) -> String {
+        String::from_str(&env, "VTINV")
+    }
+    pub fn decimals(_env: Env) -> u32 {
+        7
+    }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -76,7 +87,12 @@ impl InvoiceToken {
     pub fn issue(env: Env, to: Address, amount: i128) {
         Self::require_admin(&env);
         Self::require_kyc(&env, &to);
-        if env.storage().instance().get::<DataKey, bool>(&DataKey::Settled).unwrap_or(false) {
+        if env
+            .storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Settled)
+            .unwrap_or(false)
+        {
             panic!("invoice already settled");
         }
         let bal = Self::read_balance(&env, to.clone());
@@ -86,8 +102,14 @@ impl InvoiceToken {
         env.storage()
             .persistent()
             .extend_ttl(&DataKey::Balance(to.clone()), THRESHOLD, BUMP);
-        let supply: i128 = env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0);
-        env.storage().instance().set(&DataKey::TotalSupply, &(supply + amount));
+        let supply: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalSupply)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalSupply, &(supply + amount));
         env.events().publish((symbol_short!("issued"), to), amount);
     }
 
@@ -101,17 +123,31 @@ impl InvoiceToken {
     /// Burn tokens upon settlement / redemption.
     pub fn redeem(env: Env, from: Address, amount: i128) {
         from.require_auth();
-        if !env.storage().instance().get::<DataKey, bool>(&DataKey::Settled).unwrap_or(false) {
+        if !env
+            .storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Settled)
+            .unwrap_or(false)
+        {
             panic!("invoice not yet settled");
         }
         let bal = Self::read_balance(&env, from.clone());
-        if bal < amount { panic!("insufficient balance"); }
+        if bal < amount {
+            panic!("insufficient balance");
+        }
         env.storage()
             .persistent()
             .set(&DataKey::Balance(from.clone()), &(bal - amount));
-        let supply: i128 = env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0);
-        env.storage().instance().set(&DataKey::TotalSupply, &(supply - amount));
-        env.events().publish((symbol_short!("redeemed"), from), amount);
+        let supply: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalSupply)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalSupply, &(supply - amount));
+        env.events()
+            .publish((symbol_short!("redeemed"), from), amount);
     }
 
     pub fn balance(env: Env, id: Address) -> i128 {
@@ -119,11 +155,17 @@ impl InvoiceToken {
     }
 
     pub fn total_supply(env: Env) -> i128 {
-        env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0)
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalSupply)
+            .unwrap_or(0)
     }
 
     pub fn is_settled(env: Env) -> bool {
-        env.storage().instance().get(&DataKey::Settled).unwrap_or(false)
+        env.storage()
+            .instance()
+            .get(&DataKey::Settled)
+            .unwrap_or(false)
     }
 
     // ── Internals ────────────────────────────────────────────────────────────
@@ -152,6 +194,7 @@ impl InvoiceToken {
 mod kyc_iface {
     use soroban_sdk::{contractclient, Address};
     #[contractclient(name = "KycRegistryClient")]
+    #[allow(dead_code)]
     pub trait KycRegistry {
         fn is_approved(env: soroban_sdk::Env, addr: Address) -> bool;
     }

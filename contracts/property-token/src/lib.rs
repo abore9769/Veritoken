@@ -3,9 +3,10 @@
 //! Property Token — fractional ownership of real estate.
 //! Each token = 1 share out of total_shares. Dividends distributed in XLM/USDC.
 
-use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, Env, String,
-};
+#[cfg(test)]
+mod test;
+
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String};
 
 #[contracttype]
 pub enum DataKey {
@@ -16,7 +17,12 @@ pub enum DataKey {
     Balance(Address),
     TotalShares,
     DividendPool,
+    /// Reward debt: shares * dividend_per_share at the time of the holder's
+    /// last balance change. Dividends accrued beyond this are owed to them.
     ClaimedDividend(Address),
+    /// Dividends accrued to a holder that have not yet been claimed. Snapshotted
+    /// on every balance change so transfers never move accrued dividends.
+    Unclaimed(Address),
     DividendPerShare,
 }
 
@@ -29,9 +35,9 @@ pub struct PropertyMeta {
     pub address: String,
     pub total_valuation_usd: i128,
     pub total_shares: i128,
-    pub property_type: String,    // "residential" | "commercial" | "land"
-    pub ipfs_title_hash: String,  // off-chain title document anchor
-    pub kyc_tier_required: u32,   // minimum KYC tier for shareholders
+    pub property_type: String,   // "residential" | "commercial" | "land"
+    pub ipfs_title_hash: String, // off-chain title document anchor
+    pub kyc_tier_required: u32,  // minimum KYC tier for shareholders
 }
 
 const DAY_IN_LEDGERS: u32 = 17280;
@@ -54,31 +60,56 @@ impl PropertyToken {
             panic!("already initialized");
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::KycRegistry, &kyc_registry);
-        env.storage().instance().set(&DataKey::ComplianceEngine, &compliance_engine);
-        env.storage().instance().set(&DataKey::TotalShares, &meta.total_shares);
+        env.storage()
+            .instance()
+            .set(&DataKey::KycRegistry, &kyc_registry);
+        env.storage()
+            .instance()
+            .set(&DataKey::ComplianceEngine, &compliance_engine);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalShares, &meta.total_shares);
         env.storage().instance().set(&DataKey::DividendPool, &0i128);
-        env.storage().instance().set(&DataKey::DividendPerShare, &0i128);
+        env.storage()
+            .instance()
+            .set(&DataKey::DividendPerShare, &0i128);
         env.storage().instance().set(&DataKey::PropertyMeta, &meta);
     }
 
     // ── Metadata ─────────────────────────────────────────────────────────────
 
     pub fn get_meta(env: Env) -> PropertyMeta {
-        env.storage().instance().get(&DataKey::PropertyMeta).unwrap()
+        env.storage()
+            .instance()
+            .get(&DataKey::PropertyMeta)
+            .unwrap()
     }
 
-    pub fn name(env: Env) -> String { String::from_str(&env, "Veritoken Property") }
-    pub fn symbol(env: Env) -> String { String::from_str(&env, "VTPROP") }
-    pub fn decimals(_env: Env) -> u32 { 0 }
+    pub fn name(env: Env) -> String {
+        String::from_str(&env, "Veritoken Property")
+    }
+    pub fn symbol(env: Env) -> String {
+        String::from_str(&env, "VTPROP")
+    }
+    pub fn decimals(_env: Env) -> u32 {
+        0
+    }
 
     // ── Share management ─────────────────────────────────────────────────────
 
     pub fn mint(env: Env, to: Address, shares: i128) {
         Self::require_admin(&env);
         Self::require_kyc(&env, &to);
+        if shares <= 0 {
+            panic!("shares must be positive");
+        }
+        // Snapshot dividends accrued on the existing balance, then reset the
+        // reward debt for the new (larger) balance so freshly minted shares do
+        // not earn dividends declared before they existed.
+        Self::accrue(&env, to.clone());
         let bal = Self::read_balance(&env, to.clone());
         Self::write_balance(&env, to.clone(), bal + shares);
+        Self::reset_debt(&env, to.clone());
         env.events().publish((symbol_short!("mint"), to), shares);
     }
 
@@ -87,14 +118,22 @@ impl PropertyToken {
         Self::require_kyc(&env, &from);
         Self::require_kyc(&env, &to);
         Self::check_compliance(&env, &from, &to, shares);
-        // Settle pending dividends before balance changes
-        Self::settle_pending(&env, from.clone());
-        Self::settle_pending(&env, to.clone());
+        if shares <= 0 {
+            panic!("shares must be positive");
+        }
+        // Snapshot both parties' accrued dividends before balances move so that
+        // transferring shares never transfers already-accrued dividends.
+        Self::accrue(&env, from.clone());
+        Self::accrue(&env, to.clone());
         let from_bal = Self::read_balance(&env, from.clone());
-        if from_bal < shares { panic!("insufficient shares"); }
+        if from_bal < shares {
+            panic!("insufficient shares");
+        }
         Self::write_balance(&env, from.clone(), from_bal - shares);
         let to_bal = Self::read_balance(&env, to.clone());
         Self::write_balance(&env, to.clone(), to_bal + shares);
+        Self::reset_debt(&env, from.clone());
+        Self::reset_debt(&env, to.clone());
         env.events()
             .publish((symbol_short!("transfer"), from, to), shares);
     }
@@ -105,53 +144,112 @@ impl PropertyToken {
     pub fn deposit_dividend(env: Env, amount: i128) {
         Self::require_admin(&env);
         let total: i128 = env.storage().instance().get(&DataKey::TotalShares).unwrap();
-        if total == 0 { panic!("no shares issued"); }
-        let dps: i128 = env.storage().instance().get(&DataKey::DividendPerShare).unwrap_or(0);
+        if total == 0 {
+            panic!("no shares issued");
+        }
+        let dps: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::DividendPerShare)
+            .unwrap_or(0);
         let new_dps = dps + amount / total;
-        env.storage().instance().set(&DataKey::DividendPerShare, &new_dps);
-        let pool: i128 = env.storage().instance().get(&DataKey::DividendPool).unwrap_or(0);
-        env.storage().instance().set(&DataKey::DividendPool, &(pool + amount));
+        env.storage()
+            .instance()
+            .set(&DataKey::DividendPerShare, &new_dps);
+        let pool: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::DividendPool)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::DividendPool, &(pool + amount));
         env.events().publish((symbol_short!("div_dep"),), amount);
     }
 
     pub fn claim_dividend(env: Env, holder: Address) -> i128 {
         holder.require_auth();
-        let bal = Self::read_balance(&env, holder.clone());
-        let dps: i128 = env.storage().instance().get(&DataKey::DividendPerShare).unwrap_or(0);
-        let claimed_key = DataKey::ClaimedDividend(holder.clone());
-        let claimed: i128 = env.storage().instance().get(&claimed_key).unwrap_or(0);
-        let pending = bal * dps - claimed;
-        if pending <= 0 { return 0; }
-        env.storage().instance().set(&claimed_key, &(claimed + pending));
+        // Fold any newly accrued dividends into the unclaimed accumulator.
+        Self::accrue(&env, holder.clone());
+        let key = DataKey::Unclaimed(holder.clone());
+        let amount: i128 = env.storage().instance().get(&key).unwrap_or(0);
+        if amount <= 0 {
+            return 0;
+        }
+        env.storage().instance().set(&key, &0i128);
+        let pool: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::DividendPool)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::DividendPool, &(pool - amount));
         env.events()
-            .publish((symbol_short!("div_claim"), holder), pending);
-        pending
+            .publish((symbol_short!("div_claim"), holder), amount);
+        amount
     }
 
     pub fn pending_dividend(env: Env, holder: Address) -> i128 {
-        let bal = Self::read_balance(&env, holder.clone());
-        let dps: i128 = env.storage().instance().get(&DataKey::DividendPerShare).unwrap_or(0);
-        let claimed_key = DataKey::ClaimedDividend(holder);
-        let claimed: i128 = env.storage().instance().get(&claimed_key).unwrap_or(0);
-        bal * dps - claimed
+        let unclaimed: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Unclaimed(holder.clone()))
+            .unwrap_or(0);
+        unclaimed + Self::accrued(&env, holder)
     }
 
-    pub fn balance(env: Env, id: Address) -> i128 { Self::read_balance(&env, id) }
+    pub fn balance(env: Env, id: Address) -> i128 {
+        Self::read_balance(&env, id)
+    }
     pub fn total_shares(env: Env) -> i128 {
-        env.storage().instance().get(&DataKey::TotalShares).unwrap_or(0)
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalShares)
+            .unwrap_or(0)
     }
 
     // ── Internals ────────────────────────────────────────────────────────────
 
-    fn settle_pending(env: &Env, holder: Address) {
+    fn dps(env: &Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::DividendPerShare)
+            .unwrap_or(0)
+    }
+
+    /// Dividends owed to `holder` since their reward debt was last reset, based
+    /// on their current balance.
+    fn accrued(env: &Env, holder: Address) -> i128 {
         let bal = Self::read_balance(env, holder.clone());
-        let dps: i128 = env.storage().instance().get(&DataKey::DividendPerShare).unwrap_or(0);
-        let key = DataKey::ClaimedDividend(holder.clone());
-        let claimed: i128 = env.storage().instance().get(&key).unwrap_or(0);
-        let new_claimed = bal * dps;
-        if new_claimed > claimed {
-            env.storage().instance().set(&key, &new_claimed);
+        let debt: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ClaimedDividend(holder))
+            .unwrap_or(0);
+        bal * Self::dps(env) - debt
+    }
+
+    /// Move any accrued dividends into the holder's unclaimed accumulator and
+    /// reset their reward debt to the current balance.
+    fn accrue(env: &Env, holder: Address) {
+        let owed = Self::accrued(env, holder.clone());
+        if owed > 0 {
+            let key = DataKey::Unclaimed(holder.clone());
+            let unclaimed: i128 = env.storage().instance().get(&key).unwrap_or(0);
+            env.storage().instance().set(&key, &(unclaimed + owed));
         }
+        Self::reset_debt(env, holder);
+    }
+
+    /// Set the holder's reward debt to their current balance times the running
+    /// dividend-per-share, so future dividends accrue only from this point.
+    fn reset_debt(env: &Env, holder: Address) {
+        let bal = Self::read_balance(env, holder.clone());
+        let debt = bal * Self::dps(env);
+        env.storage()
+            .instance()
+            .set(&DataKey::ClaimedDividend(holder), &debt);
     }
 
     fn require_admin(env: &Env) {
@@ -162,11 +260,17 @@ impl PropertyToken {
     fn require_kyc(env: &Env, addr: &Address) {
         let registry: Address = env.storage().instance().get(&DataKey::KycRegistry).unwrap();
         let client = KycRegistryClient::new(env, &registry);
-        if !client.is_approved(addr) { panic!("KYC not approved"); }
+        if !client.is_approved(addr) {
+            panic!("KYC not approved");
+        }
     }
 
     fn check_compliance(env: &Env, from: &Address, to: &Address, amount: i128) {
-        let engine: Address = env.storage().instance().get(&DataKey::ComplianceEngine).unwrap();
+        let engine: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ComplianceEngine)
+            .unwrap();
         let client = ComplianceEngineClient::new(env, &engine);
         if !client.can_transfer(from, to, &amount) {
             panic!("transfer blocked by compliance engine");
@@ -174,7 +278,10 @@ impl PropertyToken {
     }
 
     fn read_balance(env: &Env, addr: Address) -> i128 {
-        env.storage().persistent().get(&DataKey::Balance(addr)).unwrap_or(0)
+        env.storage()
+            .persistent()
+            .get(&DataKey::Balance(addr))
+            .unwrap_or(0)
     }
 
     fn write_balance(env: &Env, addr: Address, amount: i128) {
@@ -187,6 +294,7 @@ impl PropertyToken {
 mod kyc_iface {
     use soroban_sdk::{contractclient, Address};
     #[contractclient(name = "KycRegistryClient")]
+    #[allow(dead_code)]
     pub trait KycRegistry {
         fn is_approved(env: soroban_sdk::Env, addr: Address) -> bool;
     }
@@ -195,10 +303,11 @@ mod kyc_iface {
 mod compliance_iface {
     use soroban_sdk::{contractclient, Address};
     #[contractclient(name = "ComplianceEngineClient")]
+    #[allow(dead_code)]
     pub trait ComplianceEngine {
         fn can_transfer(env: soroban_sdk::Env, from: Address, to: Address, amount: i128) -> bool;
     }
 }
 
-use kyc_iface::KycRegistryClient;
 use compliance_iface::ComplianceEngineClient;
+use kyc_iface::KycRegistryClient;

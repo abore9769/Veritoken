@@ -1,6 +1,8 @@
-# Veritoken
+<p align="center">
+  <img src="./assets/logo.svg" alt="Veritoken" width="320"/>
+</p>
 
-**RWA Tokenization Starter Kit for Stellar**
+<p align="center"><strong>RWA Tokenization Starter Kit for Stellar</strong></p>
 
 Veritoken is a toolkit for bringing real-world assets on-chain. It gives any team a compliant, auditable foundation for tokenizing invoices, property shares, and carbon credits — with KYC verification and transfer compliance baked in at the protocol level, not bolted on after the fact.
 
@@ -126,8 +128,8 @@ The kit is designed to be forked and customised:
 
 - [x] Core contract suite — KYC registry, compliance engine, three asset templates
 - [x] React frontend with Freighter wallet integration
-- [x] CI pipeline (GitHub Actions)
-- [ ] Soroban test suite with simulated KYC and compliance scenarios
+- [x] CI pipeline (GitHub Actions) — fmt, clippy, tests, wasm build, frontend lint/build
+- [x] Soroban test suite with simulated KYC and compliance scenarios
 - [ ] SEP-41 compliance verification against the full standard
 - [ ] Stellar CLI task runner for common admin operations
 - [ ] Audit by an independent Soroban security reviewer

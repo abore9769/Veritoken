@@ -62,11 +62,5 @@ pub fn spend_allowance(env: &Env, from: Address, spender: Address, amount: i128)
         panic!("insufficient allowance");
     }
     let new_amount = allowance.amount - amount;
-    write_allowance(
-        env,
-        from,
-        spender,
-        new_amount,
-        allowance.expiration_ledger,
-    );
+    write_allowance(env, from, spender, new_amount, allowance.expiration_ledger);
 }

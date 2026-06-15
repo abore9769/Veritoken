@@ -1,8 +1,9 @@
 #![no_std]
 
-use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, Env, Vec,
-};
+#[cfg(test)]
+mod test;
+
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Vec};
 
 #[contracttype]
 pub enum DataKey {
@@ -19,9 +20,9 @@ pub enum DataKey {
 #[contracttype]
 #[derive(Clone)]
 pub struct ComplianceRules {
-    pub max_transfer_amount: i128,  // 0 = unlimited
-    pub min_holding_period: u64,    // seconds; 0 = none
-    pub max_holders: u32,           // 0 = unlimited
+    pub max_transfer_amount: i128, // 0 = unlimited
+    pub min_holding_period: u64,   // seconds; 0 = none
+    pub max_holders: u32,          // 0 = unlimited
     pub require_same_jurisdiction: bool,
     pub paused: bool,
 }
@@ -47,7 +48,9 @@ impl ComplianceEngine {
             require_same_jurisdiction: false,
             paused: false,
         };
-        env.storage().instance().set(&DataKey::Rules, &default_rules);
+        env.storage()
+            .instance()
+            .set(&DataKey::Rules, &default_rules);
         env.storage().instance().set(&DataKey::HolderCount, &0u32);
     }
 
@@ -70,8 +73,7 @@ impl ComplianceEngine {
             list.push_back(addr.clone());
         }
         env.storage().instance().set(&DataKey::Blocklist, &list);
-        env.events()
-            .publish((symbol_short!("blocked"),), addr);
+        env.events().publish((symbol_short!("blocked"),), addr);
     }
 
     pub fn remove_from_blocklist(env: Env, addr: Address) {
@@ -142,9 +144,7 @@ impl ComplianceEngine {
             env.storage()
                 .persistent()
                 .set(&key, &env.ledger().timestamp());
-            env.storage()
-                .persistent()
-                .extend_ttl(&key, THRESHOLD, BUMP);
+            env.storage().persistent().extend_ttl(&key, THRESHOLD, BUMP);
             let count: u32 = env
                 .storage()
                 .instance()

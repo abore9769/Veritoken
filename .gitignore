@@ -1,7 +1,8 @@
 # Rust
 target/
 **/*.rs.bk
-Cargo.lock
+# Cargo.lock is intentionally committed: the contracts are deployable
+# artifacts and CI builds with --locked for reproducibility.
 
 # Frontend
 frontend/node_modules/
@@ -12,6 +13,9 @@ frontend/.env
 .stellar/
 *.wasm
 *.optimized.wasm
+
+# Soroban test execution snapshots (regenerated on every `cargo test`)
+**/test_snapshots/
 
 # OS
 .DS_Store

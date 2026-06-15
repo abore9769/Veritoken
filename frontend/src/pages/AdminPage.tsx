@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useWallet } from "../lib/wallet";
+import { PageHeader, Card, Field, Icon } from "../components/ui";
 
 export default function AdminPage() {
   const { connected } = useWallet();
@@ -13,91 +14,85 @@ export default function AdminPage() {
 
   const handleSaveRules = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!connected) { alert("Connect wallet first"); return; }
+    if (!connected) return alert("Connect wallet first");
     alert("Would call set_rules() on compliance engine");
   };
 
   return (
-    <div style={{ maxWidth: 600 }}>
-      <h1 style={styles.h1}>Admin Panel</h1>
-      <p style={styles.sub}>
-        Configure global compliance rules. Only the contract admin can call
-        these functions.
-      </p>
+    <div className="form-narrow">
+      <PageHeader
+        eyebrow="Governance"
+        icon={<Icon.admin size={22} />}
+        title="Admin Panel"
+        description="Configure global compliance rules. Only the contract admin can call these functions."
+      />
 
-      <section style={styles.card}>
-        <h2 style={styles.h2}>Compliance Rules</h2>
+      <Card title="Compliance Rules">
         <form onSubmit={handleSaveRules}>
           <Field
             label="Max Transfer Amount (0 = unlimited, in stroops)"
             type="number"
             value={rules.max_transfer_amount}
-            onChange={(e) => setRules(r => ({ ...r, max_transfer_amount: e.target.value }))}
+            onChange={(e) => setRules((r) => ({ ...r, max_transfer_amount: e.target.value }))}
           />
           <Field
             label="Min Holding Period (seconds, 0 = none)"
             type="number"
             value={rules.min_holding_period}
-            onChange={(e) => setRules(r => ({ ...r, min_holding_period: e.target.value }))}
+            onChange={(e) => setRules((r) => ({ ...r, min_holding_period: e.target.value }))}
           />
           <Field
             label="Max Holders (0 = unlimited)"
             type="number"
             value={rules.max_holders}
-            onChange={(e) => setRules(r => ({ ...r, max_holders: e.target.value }))}
+            onChange={(e) => setRules((r) => ({ ...r, max_holders: e.target.value }))}
           />
-          <div style={{ marginBottom: "1rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <label style={styles.checkboxRow}>
             <input
-              id="same-jur"
               type="checkbox"
               style={{ width: "auto" }}
               checked={rules.require_same_jurisdiction}
-              onChange={(e) => setRules(r => ({ ...r, require_same_jurisdiction: e.target.checked }))}
+              onChange={(e) => setRules((r) => ({ ...r, require_same_jurisdiction: e.target.checked }))}
             />
-            <label htmlFor="same-jur" style={{ fontSize: "0.875rem", color: "var(--color-muted)" }}>
+            <span style={{ fontSize: "0.875rem", color: "var(--text)" }}>
               Require same jurisdiction for transfers
-            </label>
-          </div>
-          <button type="submit" style={{ width: "100%" }}>Save Rules</button>
+            </span>
+          </label>
+          <button type="submit" className="btn-block">
+            Save Rules
+          </button>
         </form>
-      </section>
+      </Card>
 
-      <section style={{ ...styles.card, marginTop: "1.5rem" }}>
-        <h2 style={styles.h2}>Emergency Controls</h2>
+      <Card title="Emergency Controls" subtitle="Pause halts every transfer across all asset tokens" style={{ marginTop: "1.25rem" }}>
         <div style={{ display: "flex", gap: "1rem" }}>
           <button
             onClick={() => alert("Would call pause() on compliance engine")}
-            style={{ background: "var(--color-danger)", flex: 1 }}
+            className="btn-danger"
+            style={{ flex: 1 }}
           >
+            <Icon.bolt size={15} style={{ display: "inline", verticalAlign: "-2px", marginRight: 6 }} />
             Pause All Transfers
           </button>
           <button
             onClick={() => alert("Would call unpause() on compliance engine")}
-            style={{ background: "var(--color-success)", flex: 1 }}
+            className="btn-success"
+            style={{ flex: 1 }}
           >
             Unpause Transfers
           </button>
         </div>
-      </section>
-    </div>
-  );
-}
-
-function Field({ label, type = "text", value, onChange }: {
-  label: string; type?: string; value: string;
-  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-}) {
-  return (
-    <div style={{ marginBottom: "1rem" }}>
-      <label style={{ display: "block", marginBottom: "0.25rem", fontSize: "0.875rem", color: "var(--color-muted)" }}>{label}</label>
-      <input type={type} value={value} onChange={onChange} />
+      </Card>
     </div>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  h1: { fontSize: "1.5rem", fontWeight: 700, marginBottom: "0.5rem" },
-  h2: { fontSize: "1rem", fontWeight: 600, marginBottom: "1rem" },
-  sub: { color: "var(--color-muted)", fontSize: "0.875rem", marginBottom: "1.5rem" },
-  card: { background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "0.75rem", padding: "1.5rem" },
+  checkboxRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.6rem",
+    margin: "0.25rem 0 1.1rem",
+    cursor: "pointer",
+  },
 };

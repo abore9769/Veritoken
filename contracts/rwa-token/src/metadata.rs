@@ -1,6 +1,8 @@
 use soroban_sdk::{Env, String};
 
-use crate::storage_types::{DataKey, TokenMetadata, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD};
+use crate::storage_types::{
+    DataKey, TokenMetadata, INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD,
+};
 
 pub fn read_decimal(env: &Env) -> u32 {
     let meta = read_metadata(env);
@@ -21,14 +23,15 @@ pub fn read_metadata(env: &Env) -> TokenMetadata {
     env.storage()
         .instance()
         .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
-    env.storage()
-        .instance()
-        .get(&DataKey::Metadata)
-        .unwrap()
+    env.storage().instance().get(&DataKey::Metadata).unwrap()
 }
 
 pub fn write_metadata(env: &Env, decimal: u32, name: String, symbol: String) {
-    let meta = TokenMetadata { decimal, name, symbol };
+    let meta = TokenMetadata {
+        decimal,
+        name,
+        symbol,
+    };
     env.storage()
         .instance()
         .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
@@ -39,10 +42,7 @@ pub fn read_asset_type(env: &Env) -> String {
     env.storage()
         .instance()
         .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
-    env.storage()
-        .instance()
-        .get(&DataKey::AssetType)
-        .unwrap()
+    env.storage().instance().get(&DataKey::AssetType).unwrap()
 }
 
 pub fn write_asset_type(env: &Env, asset_type: String) {

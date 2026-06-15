@@ -1,11 +1,4 @@
-import {
-  Contract,
-  Networks,
-  TransactionBuilder,
-  BASE_FEE,
-  rpc,
-  Keypair,
-} from "@stellar/stellar-sdk";
+import { Networks, TransactionBuilder, rpc } from "@stellar/stellar-sdk";
 
 export const NETWORK = (import.meta.env.VITE_STELLAR_NETWORK as string) ?? "testnet";
 
@@ -39,10 +32,13 @@ export async function simulateAndSend(
     throw new Error(`Simulation failed: ${simResult.error}`);
   }
 
-  const prepared = rpc.assembleTransaction(
-    TransactionBuilder.fromXDR(xdr, NETWORK_PASSPHRASE),
-    simResult
-  ).toXDR();
+  const prepared = rpc
+    .assembleTransaction(
+      TransactionBuilder.fromXDR(xdr, NETWORK_PASSPHRASE),
+      simResult
+    )
+    .build()
+    .toXDR();
 
   const signed = await signTx(prepared);
   const result = await server.sendTransaction(

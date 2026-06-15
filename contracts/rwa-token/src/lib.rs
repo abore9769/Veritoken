@@ -10,19 +10,23 @@ mod kyc;
 mod metadata;
 mod storage_types;
 
+#[cfg(test)]
+mod test;
+
 #[contract]
 pub struct RwaToken;
 
 #[contractimpl]
 impl RwaToken {
     /// Initialize the RWA token with metadata and compliance configuration.
+    #[allow(clippy::too_many_arguments)]
     pub fn initialize(
         env: Env,
         admin: Address,
         decimal: u32,
         name: String,
         symbol: String,
-        asset_type: String,   // "invoice" | "property" | "carbon_credit"
+        asset_type: String, // "invoice" | "property" | "carbon_credit"
         kyc_registry: Address,
         compliance_engine: Address,
     ) {
@@ -53,9 +57,21 @@ impl RwaToken {
         allowance::read_allowance(&env, from, spender).amount
     }
 
-    pub fn approve(env: Env, from: Address, spender: Address, amount: i128, expiration_ledger: u32) {
+    pub fn approve(
+        env: Env,
+        from: Address,
+        spender: Address,
+        amount: i128,
+        expiration_ledger: u32,
+    ) {
         from.require_auth();
-        allowance::write_allowance(&env, from.clone(), spender.clone(), amount, expiration_ledger);
+        allowance::write_allowance(
+            &env,
+            from.clone(),
+            spender.clone(),
+            amount,
+            expiration_ledger,
+        );
         env.events().publish(
             (symbol_short!("approve"), from, spender),
             (amount, expiration_ledger),
@@ -95,8 +111,7 @@ impl RwaToken {
         balance::spend_balance(&env, from.clone(), amount);
         let supply = balance::read_total_supply(&env);
         balance::write_total_supply(&env, supply - amount);
-        env.events()
-            .publish((symbol_short!("burn"), from), amount);
+        env.events().publish((symbol_short!("burn"), from), amount);
     }
 
     pub fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
@@ -105,8 +120,7 @@ impl RwaToken {
         balance::spend_balance(&env, from.clone(), amount);
         let supply = balance::read_total_supply(&env);
         balance::write_total_supply(&env, supply - amount);
-        env.events()
-            .publish((symbol_short!("burn"), from), amount);
+        env.events().publish((symbol_short!("burn"), from), amount);
     }
 
     pub fn decimals(env: Env) -> u32 {
@@ -134,8 +148,7 @@ impl RwaToken {
         balance::receive_balance(&env, to.clone(), amount);
         let supply = balance::read_total_supply(&env);
         balance::write_total_supply(&env, supply + amount);
-        env.events()
-            .publish((symbol_short!("mint"), to), amount);
+        env.events().publish((symbol_short!("mint"), to), amount);
     }
 
     // ── RWA Compliance Metadata ──────────────────────────────────────────────

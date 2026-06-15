@@ -8,9 +8,11 @@ use crate::storage_types::{
 pub fn read_balance(env: &Env, addr: Address) -> i128 {
     let key = DataKey::Balance(addr);
     if let Some(balance) = env.storage().persistent().get::<DataKey, i128>(&key) {
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, BALANCE_LIFETIME_THRESHOLD, BALANCE_BUMP_AMOUNT);
+        env.storage().persistent().extend_ttl(
+            &key,
+            BALANCE_LIFETIME_THRESHOLD,
+            BALANCE_BUMP_AMOUNT,
+        );
         balance
     } else {
         0
@@ -52,7 +54,5 @@ pub fn write_total_supply(env: &Env, supply: i128) {
     env.storage()
         .instance()
         .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
-    env.storage()
-        .instance()
-        .set(&DataKey::TotalSupply, &supply);
+    env.storage().instance().set(&DataKey::TotalSupply, &supply);
 }
