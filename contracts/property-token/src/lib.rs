@@ -124,6 +124,7 @@ impl PropertyToken {
         let bal = Self::read_balance(&env, to.clone());
         Self::write_balance(&env, to.clone(), bal + shares);
         Self::reset_debt(&env, to.clone());
+        Self::register_holder(&env, &to);
         env.events().publish((symbol_short!("mint"), to), shares);
     }
 
@@ -148,6 +149,7 @@ impl PropertyToken {
         Self::write_balance(&env, to.clone(), to_bal + shares);
         Self::reset_debt(&env, from.clone());
         Self::reset_debt(&env, to.clone());
+        Self::register_holder(&env, &to);
         env.events()
             .publish((symbol_short!("transfer"), from, to), shares);
     }
@@ -316,6 +318,16 @@ impl PropertyToken {
         }
     }
 
+    fn register_holder(env: &Env, addr: &Address) {
+        let engine: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ComplianceEngine)
+            .unwrap();
+        let client = ComplianceEngineClient::new(env, &engine);
+        client.register_holder(addr);
+    }
+
     fn read_balance(env: &Env, addr: Address) -> i128 {
         env.storage()
             .persistent()
@@ -348,6 +360,7 @@ mod compliance_iface {
         fn get_rules(env: soroban_sdk::Env) -> super::compliance_engine::ComplianceRules;
         fn is_blocklisted(env: soroban_sdk::Env, addr: Address) -> bool;
         fn can_transfer(env: soroban_sdk::Env, from: Address, to: Address, amount: i128) -> bool;
+        fn register_holder(env: soroban_sdk::Env, addr: Address);
     }
 }
 

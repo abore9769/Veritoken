@@ -123,6 +123,7 @@ impl CarbonCreditToken {
         env.storage()
             .instance()
             .set(&DataKey::TotalSupply, &(supply + amount));
+        Self::register_holder(&env, &to);
         env.events().publish((symbol_short!("mint"), to), amount);
     }
 
@@ -140,6 +141,7 @@ impl CarbonCreditToken {
         Self::write_balance(&env, from.clone(), from_bal - amount);
         let to_bal = Self::read_balance(&env, to.clone());
         Self::write_balance(&env, to.clone(), to_bal + amount);
+        Self::register_holder(&env, &to);
         env.events()
             .publish((symbol_short!("transfer"), from, to), amount);
     }
@@ -261,6 +263,16 @@ impl CarbonCreditToken {
         }
     }
 
+    fn register_holder(env: &Env, addr: &Address) {
+        let engine: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ComplianceEngine)
+            .unwrap();
+        let client = ComplianceEngineClient::new(env, &engine);
+        client.register_holder(addr);
+    }
+
     fn read_balance(env: &Env, addr: Address) -> i128 {
         env.storage()
             .persistent()
@@ -292,6 +304,7 @@ mod compliance_iface {
         fn get_rules(env: soroban_sdk::Env) -> super::compliance_engine::ComplianceRules;
         fn is_blocklisted(env: soroban_sdk::Env, addr: Address) -> bool;
         fn can_transfer(env: soroban_sdk::Env, from: Address, to: Address, amount: i128) -> bool;
+        fn register_holder(env: soroban_sdk::Env, addr: Address);
     }
 }
 
