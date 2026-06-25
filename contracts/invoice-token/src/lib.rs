@@ -3,6 +3,8 @@
 //! Invoice Token — tokenizes accounts-receivable invoices.
 //! Each token unit represents 1 USD (7-decimal precision) of invoice face value.
 //! Adds invoice-specific metadata: issuer, debtor, due date, face value, discount rate.
+//! After settlement, redemption remains subject to compliance enforcement: a
+//! paused engine or blocklisted holder cannot redeem invoice tokens.
 
 #[cfg(test)]
 mod test;
@@ -158,6 +160,7 @@ impl InvoiceToken {
         {
             panic!("invoice not yet settled");
         }
+        Self::check_redeem_compliance(&env, &from);
         let bal = Self::read_balance(&env, from.clone());
         if bal < amount {
             panic!("insufficient balance");
@@ -300,6 +303,21 @@ impl InvoiceToken {
         }
     }
 
+    fn check_redeem_compliance(env: &Env, holder: &Address) {
+        let engine: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ComplianceEngine)
+            .unwrap();
+        let client = ComplianceEngineClient::new(env, &engine);
+        if client.get_rules().paused {
+            panic!("redemption blocked by compliance pause");
+        }
+        if client.is_blocklisted(holder) {
+            panic!("redemption blocked for blocklisted holder");
+        }
+    }
+
     fn read_balance(env: &Env, addr: Address) -> i128 {
         env.storage()
             .persistent()
@@ -337,6 +355,32 @@ mod kyc_iface {
         fn is_approved(env: soroban_sdk::Env, addr: Address) -> bool;
     }
 }
+
+mod compliance_iface {
+    use soroban_sdk::{contractclient, Address};
+    #[contractclient(name = "ComplianceEngineClient")]
+    #[allow(dead_code)]
+    pub trait ComplianceEngine {
+        fn get_rules(env: soroban_sdk::Env) -> super::compliance_engine::ComplianceRules;
+        fn is_blocklisted(env: soroban_sdk::Env, addr: Address) -> bool;
+    }
+}
+
+mod compliance_engine {
+    use soroban_sdk::contracttype;
+
+    #[contracttype]
+    #[derive(Clone)]
+    pub struct ComplianceRules {
+        pub max_transfer_amount: i128,
+        pub min_holding_period: u64,
+        pub max_holders: u32,
+        pub require_same_jurisdiction: bool,
+        pub paused: bool,
+    }
+}
+
+use compliance_iface::ComplianceEngineClient;
 use kyc_iface::KycRegistryClient;
 
 mod compliance_iface {

@@ -1,6 +1,7 @@
 #![cfg(test)]
 
 use crate::{InvoiceMeta, InvoiceToken, InvoiceTokenClient};
+use compliance_engine::{ComplianceEngine, ComplianceEngineClient};
 use kyc_registry::{KycRegistry, KycRegistryClient};
 use compliance_engine::{ComplianceEngine, ComplianceEngineClient};
 use soroban_sdk::{testutils::Address as _, Address, Env, String};
