@@ -108,6 +108,12 @@ impl ComplianceEngine {
 
     /// Called by rwa-token before every transfer. Returns true if the
     /// transfer is compliant with all configured rules.
+    /// Called by asset tokens to validate a transfer.
+    ///
+    /// The minimum holding period is measured from the holder's most recent receipt of
+    /// tokens (mint or transfer-in). A new receipt resets the holder's lockup clock for
+    /// all of their tokens, so newly received balances cannot bypass the holding period
+    /// by relying on an earlier acquisition time.
     pub fn can_transfer(env: Env, from: Address, to: Address, amount: i128) -> bool {
         let rules: ComplianceRules = env.storage().instance().get(&DataKey::Rules).unwrap();
 
@@ -137,14 +143,19 @@ impl ComplianceEngine {
         true
     }
 
-    /// Called by rwa-token after a mint to register a new holder.
+    /// Called by asset tokens on every receipt of tokens (mint or transfer-in).
+    ///
+    /// This resets the holder's lockup clock to the current ledger timestamp every time
+    /// the holder receives new tokens. The holder count is incremented only when the
+    /// address is first seen.
     pub fn register_holder(env: Env, addr: Address) {
         let key = DataKey::HolderSince(addr.clone());
-        if !env.storage().persistent().has(&key) {
-            env.storage()
-                .persistent()
-                .set(&key, &env.ledger().timestamp());
-            env.storage().persistent().extend_ttl(&key, THRESHOLD, BUMP);
+        let is_new = !env.storage().persistent().has(&key);
+        env.storage()
+            .persistent()
+            .set(&key, &env.ledger().timestamp());
+        env.storage().persistent().extend_ttl(&key, THRESHOLD, BUMP);
+        if is_new {
             let count: u32 = env
                 .storage()
                 .instance()

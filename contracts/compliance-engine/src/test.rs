@@ -109,6 +109,31 @@ fn test_register_holder_is_idempotent() {
 }
 
 #[test]
+fn test_register_holder_resets_holding_period_on_receipt() {
+    let (env, client, _admin) = setup();
+    let holder = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    client.set_rules(&rules(0, 1_000, 0, false));
+
+    env.ledger().set_timestamp(1_000);
+    client.register_holder(&holder);
+    assert_eq!(client.holder_count(), 1);
+
+    env.ledger().set_timestamp(1_500);
+    assert!(!client.can_transfer(&holder, &recipient, &1));
+
+    env.ledger().set_timestamp(2_000);
+    client.register_holder(&holder);
+    assert_eq!(client.holder_count(), 1);
+
+    env.ledger().set_timestamp(2_500);
+    assert!(!client.can_transfer(&holder, &recipient, &1));
+
+    env.ledger().set_timestamp(3_001);
+    assert!(client.can_transfer(&holder, &recipient, &1));
+}
+
+#[test]
 fn test_only_admin_can_set_rules() {
     let env = Env::default();
     let admin = Address::generate(&env);

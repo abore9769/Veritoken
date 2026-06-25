@@ -102,6 +102,7 @@ impl InvoiceToken {
         env.storage()
             .persistent()
             .extend_ttl(&DataKey::Balance(to.clone()), THRESHOLD, BUMP);
+        Self::register_holder(&env, to.clone());
         let supply: i128 = env
             .storage()
             .instance()
@@ -183,6 +184,12 @@ impl InvoiceToken {
         }
     }
 
+    fn register_holder(env: &Env, addr: Address) {
+        let engine: Address = env.storage().instance().get(&DataKey::ComplianceEngine).unwrap();
+        let client = ComplianceEngineClient::new(env, &engine);
+        client.register_holder(addr);
+    }
+
     fn read_balance(env: &Env, addr: Address) -> i128 {
         env.storage()
             .persistent()
@@ -199,4 +206,15 @@ mod kyc_iface {
         fn is_approved(env: soroban_sdk::Env, addr: Address) -> bool;
     }
 }
+
+mod compliance_iface {
+    use soroban_sdk::{contractclient, Address};
+    #[contractclient(name = "ComplianceEngineClient")]
+    #[allow(dead_code)]
+    pub trait ComplianceEngine {
+        fn register_holder(env: soroban_sdk::Env, addr: Address);
+    }
+}
+
+use compliance_iface::ComplianceEngineClient;
 use kyc_iface::KycRegistryClient;

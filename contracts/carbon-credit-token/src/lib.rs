@@ -102,6 +102,7 @@ impl CarbonCreditToken {
         Self::require_kyc(&env, &to);
         let bal = Self::read_balance(&env, to.clone());
         Self::write_balance(&env, to.clone(), bal + amount);
+        Self::register_holder(&env, to.clone());
         let supply: i128 = env
             .storage()
             .instance()
@@ -127,6 +128,7 @@ impl CarbonCreditToken {
         Self::write_balance(&env, from.clone(), from_bal - amount);
         let to_bal = Self::read_balance(&env, to.clone());
         Self::write_balance(&env, to.clone(), to_bal + amount);
+        Self::register_holder(&env, to.clone());
         env.events()
             .publish((symbol_short!("transfer"), from, to), amount);
     }
@@ -233,6 +235,16 @@ impl CarbonCreditToken {
         }
     }
 
+    fn register_holder(env: &Env, addr: Address) {
+        let engine: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ComplianceEngine)
+            .unwrap();
+        let client = ComplianceEngineClient::new(env, &engine);
+        client.register_holder(addr);
+    }
+
     fn read_balance(env: &Env, addr: Address) -> i128 {
         env.storage()
             .persistent()
@@ -262,6 +274,7 @@ mod compliance_iface {
     #[allow(dead_code)]
     pub trait ComplianceEngine {
         fn can_transfer(env: soroban_sdk::Env, from: Address, to: Address, amount: i128) -> bool;
+        fn register_holder(env: soroban_sdk::Env, addr: Address);
     }
 }
 
