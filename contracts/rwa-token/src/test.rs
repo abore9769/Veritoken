@@ -3,7 +3,7 @@
 use crate::{RwaToken, RwaTokenClient};
 use compliance_engine::{ComplianceEngine, ComplianceEngineClient, ComplianceRules};
 use kyc_registry::{KycRegistry, KycRegistryClient};
-use soroban_sdk::{testutils::Address as _, Address, Env, String};
+use soroban_sdk::{testutils::{Address as _, Ledger as _}, Address, Env, String};
 
 struct Harness {
     env: Env,
@@ -214,4 +214,66 @@ fn test_compliance_metadata() {
         h.token.get_compliance_metadata(&key),
         String::from_str(&h.env, "prospectus-v1")
     );
+}
+
+#[test]
+fn test_secondary_market_holder_registration() {
+    let h = setup();
+    let alice = Address::generate(&h.env);
+    let bob = Address::generate(&h.env);
+    let carl = Address::generate(&h.env);
+
+    h.approve_kyc(&alice);
+    h.approve_kyc(&bob);
+    h.approve_kyc(&carl);
+
+    // 1. Mint tokens to A (Alice)
+    h.token.mint(&alice, &1_000);
+
+    // 2. Verify A (Alice) registered
+    assert_eq!(h.compliance.holder_count(), 1);
+
+    // 3. Transfer A -> B (Alice -> Bob)
+    h.token.transfer(&alice, &bob, &400);
+
+    // 4. Verify B (Bob) registered
+    // 5. Verify holder_count increased
+    assert_eq!(h.compliance.holder_count(), 2);
+
+    // 6. Verify HolderSince exists for B (Bob) by setting a min holding period rule
+    h.compliance.set_rules(&ComplianceRules {
+        max_transfer_amount: 0,
+        min_holding_period: 1_000,
+        max_holders: 0,
+        require_same_jurisdiction: false,
+        paused: false,
+    });
+
+    // Let's set ledger timestamp to B's registration time (let's say 5_000)
+    // Actually, h.env.ledger().timestamp() is 0 by default. B was registered at 0.
+    // If we try to transfer from Bob to Carl at timestamp 500, it should fail (elapsed < 1_000).
+    h.env.ledger().set_timestamp(500);
+    assert!(!h.compliance.can_transfer(&bob, &carl, &100));
+
+    // At timestamp 1_001, it should succeed (elapsed >= 1_000).
+    h.env.ledger().set_timestamp(1_001);
+    assert!(h.compliance.can_transfer(&bob, &carl, &100));
+
+    // Also verify:
+    // * repeated transfers to B do not increase holder_count again
+    h.token.transfer(&alice, &bob, &100);
+    assert_eq!(h.compliance.holder_count(), 2);
+
+    // * failed transfers do not register recipients:
+    //   - failed due to KYC (Dave is not KYC'd)
+    let dave = Address::generate(&h.env);
+    let res_kyc = h.token.try_transfer(&bob, &dave, &10);
+    assert!(res_kyc.is_err());
+    assert_eq!(h.compliance.holder_count(), 2);
+
+    //   - failed due to compliance (paused)
+    h.compliance.pause();
+    let res_comp = h.token.try_transfer(&bob, &carl, &10);
+    assert!(res_comp.is_err());
+    assert_eq!(h.compliance.holder_count(), 2);
 }

@@ -89,6 +89,7 @@ impl RwaToken {
         compliance::check_transfer(&env, &from, &to, amount);
         balance::spend_balance(&env, from.clone(), amount);
         balance::receive_balance(&env, to.clone(), amount);
+        compliance::register_holder(&env, &to);
         env.events()
             .publish((symbol_short!("transfer"), from, to), amount);
     }
@@ -101,6 +102,7 @@ impl RwaToken {
         allowance::spend_allowance(&env, from.clone(), spender, amount);
         balance::spend_balance(&env, from.clone(), amount);
         balance::receive_balance(&env, to.clone(), amount);
+        compliance::register_holder(&env, &to);
         env.events()
             .publish((symbol_short!("transfer"), from, to), amount);
     }
@@ -148,6 +150,7 @@ impl RwaToken {
         balance::receive_balance(&env, to.clone(), amount);
         let supply = balance::read_total_supply(&env);
         balance::write_total_supply(&env, supply + amount);
+        compliance::register_holder(&env, &to);
         env.events().publish((symbol_short!("mint"), to), amount);
     }
 
