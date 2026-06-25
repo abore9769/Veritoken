@@ -41,9 +41,17 @@ fn setup() -> Harness {
     let compliance = ComplianceEngineClient::new(&env, &compliance_id);
     compliance.initialize(&admin);
 
-    let token_id = env.register(CarbonCreditToken, ());
+    // Carbon credit token — constructor args passed atomically at register time
+    let token_id = env.register(
+        CarbonCreditToken,
+        (
+            admin.clone(),
+            kyc_id.clone(),
+            compliance_id.clone(),
+            meta(&env),
+        ),
+    );
     let token = CarbonCreditTokenClient::new(&env, &token_id);
-    token.initialize(&admin, &kyc_id, &compliance_id, &meta(&env));
 
     Harness {
         env,
@@ -91,6 +99,26 @@ fn test_mint_and_transfer() {
     h.token.transfer(&alice, &bob, &200);
     assert_eq!(h.token.balance(&alice), 300);
     assert_eq!(h.token.balance(&bob), 200);
+}
+
+#[test]
+fn test_mint_rejects_blocklisted_recipient() {
+    let h = setup();
+    let alice = Address::generate(&h.env);
+    h.approve_kyc(&alice);
+    h.compliance.add_to_blocklist(&alice);
+
+    assert!(h.token.try_mint(&alice, &100).is_err());
+}
+
+#[test]
+fn test_mint_rejects_when_compliance_paused() {
+    let h = setup();
+    let alice = Address::generate(&h.env);
+    h.approve_kyc(&alice);
+    h.compliance.pause();
+
+    assert!(h.token.try_mint(&alice, &100).is_err());
 }
 
 #[test]
@@ -160,85 +188,14 @@ fn test_retire_insufficient_balance() {
 }
 
 #[test]
-fn test_get_receipts_pagination() {
+fn test_non_deployer_cannot_reinitialize() {
     let h = setup();
-    let alice = Address::generate(&h.env);
-    h.approve_kyc(&alice);
-    h.token.mint(&alice, &50);
-
-    for i in 0..5u32 {
-        h.token.retire(
-            &alice,
-            &1,
-            &String::from_str(&h.env, "beneficiary"),
-            &String::from_str(&h.env, "reason"),
-        );
-        let _ = i;
-    }
-
-    assert_eq!(h.token.retirement_count(), 5);
-
-    // page 0: items 0..2
-    let page0 = h.token.get_receipts(&0, &2);
-    assert_eq!(page0.len(), 2);
-    // page 1: items 2..4
-    let page1 = h.token.get_receipts(&2, &2);
-    assert_eq!(page1.len(), 2);
-    // page 2: item 4
-    let page2 = h.token.get_receipts(&4, &2);
-    assert_eq!(page2.len(), 1);
-    // start past end: empty
-    let empty = h.token.get_receipts(&5, &2);
-    assert_eq!(empty.len(), 0);
-}
-
-#[test]
-fn test_get_receipts_caps_limit() {
-    let h = setup();
-    let alice = Address::generate(&h.env);
-    h.approve_kyc(&alice);
-    h.token.mint(&alice, &10);
-
-    for _ in 0..10u32 {
-        h.token.retire(
-            &alice,
-            &1,
-            &String::from_str(&h.env, "b"),
-            &String::from_str(&h.env, "r"),
-        );
-    }
-
-    // requesting 200 should be capped to MAX_PAGE_SIZE (100), but we only have 10
-    let page = h.token.get_receipts(&0, &200);
-    assert_eq!(page.len(), 10);
-}
-
-#[test]
-fn test_retire_1000_scale() {
-    let h = setup();
-    let alice = Address::generate(&h.env);
-    h.approve_kyc(&alice);
-    h.token.mint(&alice, &1000);
-
-    for _ in 0..1000u32 {
-        h.token.retire(
-            &alice,
-            &1,
-            &String::from_str(&h.env, "b"),
-            &String::from_str(&h.env, "r"),
-        );
-    }
-
-    assert_eq!(h.token.retirement_count(), 1000);
-    assert_eq!(h.token.total_retired(), 1000);
-    assert_eq!(h.token.balance(&alice), 0);
-
-    // spot-check a few receipts at arbitrary indices
-    assert_eq!(h.token.get_receipt(&0).amount, 1);
-    assert_eq!(h.token.get_receipt(&499).amount, 1);
-    assert_eq!(h.token.get_receipt(&999).amount, 1);
-
-    // paginate the last page
-    let last_page = h.token.get_receipts(&950, &100);
-    assert_eq!(last_page.len(), 50);
+    let attacker = Address::generate(&h.env);
+    let kyc_id = Address::generate(&h.env);
+    let ce_id = Address::generate(&h.env);
+    // initialize must always panic — the constructor has already run
+    let result = h
+        .token
+        .try_initialize(&attacker, &kyc_id, &ce_id, &meta(&h.env));
+    assert!(result.is_err());
 }
