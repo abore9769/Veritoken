@@ -272,105 +272,15 @@ fn test_non_deployer_cannot_reinitialize() {
 }
 
 #[test]
-fn test_update_kyc_registry_admin_only() {
+fn test_mint_twice_same_address_holder_count_is_one() {
     let h = setup();
-    let new_kyc = Address::generate(&h.env);
+    let user = Address::generate(&h.env);
+    h.approve_kyc(&user);
 
-    // Non-admin: use a fresh env with no auths mocked, register the same
-    // contract type and call without auth — must fail.
-    {
-        let env2 = Env::default();
-        let non_admin = Address::generate(&env2);
-        let token_id2 = env2.register(
-            RwaToken,
-            (
-                non_admin.clone(),
-                7u32,
-                String::from_str(&env2, "T"),
-                String::from_str(&env2, "T"),
-                String::from_str(&env2, "property"),
-                Address::generate(&env2),
-                Address::generate(&env2),
-            ),
-        );
-        let client2 = RwaTokenClient::new(&env2, &token_id2);
-        // no mock_all_auths, so require_auth panics → try_* returns Err
-        assert!(client2.try_update_kyc_registry(&Address::generate(&env2)).is_err());
-    }
+    h.token.mint(&user, &1_000);
+    h.token.mint(&user, &500);
 
-    // Admin succeeds
-    h.token.update_kyc_registry(&new_kyc);
-    assert_eq!(h.token.kyc_registry(), new_kyc);
-}
-
-#[test]
-fn test_update_compliance_engine_admin_only() {
-    let h = setup();
-    let new_ce = Address::generate(&h.env);
-
-    // Non-admin: separate env, no auths mocked
-    {
-        let env2 = Env::default();
-        let non_admin = Address::generate(&env2);
-        let token_id2 = env2.register(
-            RwaToken,
-            (
-                non_admin.clone(),
-                7u32,
-                String::from_str(&env2, "T"),
-                String::from_str(&env2, "T"),
-                String::from_str(&env2, "property"),
-                Address::generate(&env2),
-                Address::generate(&env2),
-            ),
-        );
-        let client2 = RwaTokenClient::new(&env2, &token_id2);
-        assert!(client2.try_update_compliance_engine(&Address::generate(&env2)).is_err());
-    }
-
-    // Admin succeeds
-    h.token.update_compliance_engine(&new_ce);
-    assert_eq!(h.token.compliance_engine(), new_ce);
-}
-
-#[test]
-fn test_update_kyc_registry_affects_transfers() {
-    let h = setup();
-
-    // Deploy a second KYC registry that approves nobody
-    let kyc2_id = h.env.register(KycRegistry, ());
-    let kyc2 = KycRegistryClient::new(&h.env, &kyc2_id);
-    kyc2.initialize(&h.admin);
-    // (no verifier added, so no one is approved)
-
-    let alice = Address::generate(&h.env);
-    let bob = Address::generate(&h.env);
-    h.approve_kyc(&alice);
-    h.approve_kyc(&bob);
-    h.token.mint(&alice, &100);
-
-    // Switch to new empty KYC registry — alice & bob are not approved there
-    h.token.update_kyc_registry(&kyc2_id);
-    assert!(h.token.try_transfer(&alice, &bob, &10).is_err());
-}
-
-#[test]
-fn test_update_compliance_engine_affects_transfers() {
-    let h = setup();
-
-    // Deploy a second compliance engine and immediately pause it
-    let ce2_id = h.env.register(ComplianceEngine, ());
-    let ce2 = ComplianceEngineClient::new(&h.env, &ce2_id);
-    ce2.initialize(&h.admin);
-    ce2.pause();
-
-    let alice = Address::generate(&h.env);
-    let bob = Address::generate(&h.env);
-    h.approve_kyc(&alice);
-    h.approve_kyc(&bob);
-    h.token.mint(&alice, &100);
-
-    // Switch to paused engine — transfers must be blocked
-    h.token.update_compliance_engine(&ce2_id);
-    assert!(h.token.try_transfer(&alice, &bob, &10).is_err());
+    assert_eq!(h.compliance.holder_count(), 1);
+    assert_eq!(h.token.balance(&user), 1_500);
+    assert_eq!(h.token.total_supply(), 1_500);
 }

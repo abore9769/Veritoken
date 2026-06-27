@@ -40,7 +40,7 @@ fn setup() -> Harness {
 
     let compliance_id = env.register(ComplianceEngine, ());
     let compliance = ComplianceEngineClient::new(&env, &compliance_id);
-    compliance.initialize(&admin);
+    compliance.initialize(&admin, &kyc_id);
 
     // Carbon credit token — constructor args passed atomically at register time
     let token_id = env.register(
@@ -187,6 +187,19 @@ fn test_retire_insufficient_balance() {
             &String::from_str(&h.env, "y"),
         )
         .is_err());
+}
+
+#[test]
+fn test_mint_twice_same_address_holder_count_is_one() {
+    let h = setup();
+    let alice = Address::generate(&h.env);
+    h.approve_kyc(&alice);
+
+    h.token.mint(&alice, &100);
+    h.token.mint(&alice, &50);
+
+    assert_eq!(h.compliance.holder_count(), 1);
+    assert_eq!(h.token.balance(&alice), 150);
 }
 
 #[test]
