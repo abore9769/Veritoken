@@ -108,7 +108,7 @@ const ERROR_TABLES: Record<ContractType, Record<number, string>> = {
  */
 export function decodeContractError(
   contractType: ContractType,
-  code: number
+  code: number,
 ): string {
   return (
     ERROR_TABLES[contractType]?.[code] ??
@@ -118,10 +118,10 @@ export function decodeContractError(
 
 export async function simulateAndSend(
   xdr: string,
-  signTx: (xdr: string) => Promise<string>
+  signTx: (xdr: string) => Promise<string>,
 ): Promise<rpc.Api.GetSuccessfulTransactionResponse> {
   const simResult = await server.simulateTransaction(
-    TransactionBuilder.fromXDR(xdr, NETWORK_PASSPHRASE)
+    TransactionBuilder.fromXDR(xdr, NETWORK_PASSPHRASE),
   );
 
   if (rpc.Api.isSimulationError(simResult)) {
@@ -138,18 +138,20 @@ export async function simulateAndSend(
   const prepared = rpc
     .assembleTransaction(
       TransactionBuilder.fromXDR(xdr, NETWORK_PASSPHRASE),
-      simResult
+      simResult,
     )
     .build()
     .toXDR();
 
   const signed = await signTx(prepared);
   const result = await server.sendTransaction(
-    TransactionBuilder.fromXDR(signed, NETWORK_PASSPHRASE)
+    TransactionBuilder.fromXDR(signed, NETWORK_PASSPHRASE),
   );
 
   if (result.status === "ERROR") {
-    throw new Error(`Transaction failed: ${JSON.stringify(result.errorResult)}`);
+    throw new Error(
+      `Transaction failed: ${JSON.stringify(result.errorResult)}`,
+    );
   }
 
   // Poll for confirmation
@@ -164,4 +166,17 @@ export async function simulateAndSend(
   }
 
   return getResult as rpc.Api.GetSuccessfulTransactionResponse;
+}
+
+/**
+ * Fetch contract events for a given contract ID.
+ * Returns a stub implementation for now.
+ */
+export async function fetchContractEvents(
+  _contractId: string,
+  _limit: number = 10,
+): Promise<any[]> {
+  // Stub implementation - returns empty array
+  // In a real implementation, this would query the blockchain for contract events
+  return [];
 }

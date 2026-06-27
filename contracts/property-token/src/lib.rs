@@ -245,6 +245,43 @@ impl PropertyToken {
             .publish((symbol_short!("transfer"), from, to), shares);
     }
 
+    /// Admin-initiated buyback (forced redemption) of shares from a holder.
+    /// Snapshots dividends before burning. Requires holder to have active KYC.
+    /// Decreases total minted shares. Emits a buyback event.
+    pub fn buyback(env: Env, from: Address, shares: i128) {
+        env.storage().instance().extend_ttl(THRESHOLD, BUMP);
+        Self::require_admin(&env);
+        Self::require_kyc(&env, &from);
+        if shares <= 0 {
+            panic_with_error!(env, PropertyError::NegativeShares);
+        }
+        // Snapshot accrued dividends before balance changes
+        Self::accrue(&env, from.clone());
+        let balance = Self::read_balance(&env, from.clone());
+        if balance < shares {
+            panic_with_error!(env, PropertyError::InsufficientShares);
+        }
+        // Decrease holder's balance (burn shares)
+        Self::write_balance(&env, from.clone(), balance - shares);
+        // Decrease total minted shares
+        let total: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalShares)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalShares, &(total - shares));
+        // Reset debt for the holder (new balance basis for future dividends)
+        Self::reset_debt(&env, from.clone());
+        // Remove holder if balance is now zero
+        if balance == shares {
+            Self::remove_holder_local(&env, &from);
+        }
+        // Emit buyback event
+        env.events().publish((symbol_short!("buyback"),), (from, shares));
+    }
+
     // ── SEP-41 Allowance / Delegated Transfer ───────────────────────────────
 
     /// Approve `spender` to transfer up to `amount` shares on behalf of `from`.
