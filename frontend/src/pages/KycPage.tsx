@@ -2,10 +2,16 @@ import { useState } from "react";
 import { useWallet } from "../lib/wallet";
 import { CONTRACT_IDS } from "../lib/stellar";
 import { PageHeader, Card, Field, Select, Icon } from "../components/ui";
+import { AddressInput } from "../components/AddressInput";
+import { useAddressBook } from "../lib/addressBook";
 
 export default function KycPage() {
   const { connected } = useWallet();
+  const { addEntry } = useAddressBook();
   const [lookup, setLookup] = useState("");
+  const [showAddressBookModal, setShowAddressBookModal] = useState(false);
+  const [addressBookLabel, setAddressBookLabel] = useState("");
+  const [pendingAddress, setPendingAddress] = useState("");
   const [approveForm, setApproveForm] = useState({
     subject: "",
     tier: "0",
@@ -25,6 +31,22 @@ export default function KycPage() {
     e.preventDefault();
     if (!connected) return alert("Connect wallet first");
     alert(`Would approve KYC for ${approveForm.subject} at tier ${approveForm.tier}`);
+  };
+
+  const handleAddToAddressBook = (address: string) => {
+    setPendingAddress(address);
+    setAddressBookLabel("");
+    setShowAddressBookModal(true);
+  };
+
+  const confirmAddToAddressBook = () => {
+    if (addressBookLabel.trim()) {
+      addEntry(pendingAddress, addressBookLabel);
+      setApproveForm((f) => ({ ...f, subject: pendingAddress }));
+      setShowAddressBookModal(false);
+      setAddressBookLabel("");
+      setPendingAddress("");
+    }
   };
 
   return (
@@ -50,7 +72,14 @@ export default function KycPage() {
 
       <Card title="Approve KYC" subtitle="Verifier only" style={{ marginTop: "1.25rem" }}>
         <form onSubmit={handleApprove}>
-          <Field label="Subject Address" value={approveForm.subject} onChange={set("subject")} required placeholder="G…" />
+          <AddressInput
+            label="Subject Address"
+            value={approveForm.subject}
+            onChange={(value) => setApproveForm((f) => ({ ...f, subject: value }))}
+            required
+            placeholder="G…"
+            onAddToBook={handleAddToAddressBook}
+          />
           <Select
             label="KYC Tier"
             value={approveForm.tier}
@@ -68,6 +97,57 @@ export default function KycPage() {
           </button>
         </form>
       </Card>
+
+      {showAddressBookModal && (
+        <div style={modalOverlayStyle}>
+          <div style={modalStyle}>
+            <h3 style={{ marginBottom: "1rem" }}>Add to Address Book</h3>
+            <input
+              type="text"
+              placeholder="Label (e.g., 'Alice - Investor')"
+              value={addressBookLabel}
+              onChange={(e) => setAddressBookLabel(e.target.value)}
+              style={{ width: "100%", marginBottom: "1rem" }}
+            />
+            <div style={{ display: "flex", gap: "0.75rem" }}>
+              <button
+                onClick={() => setShowAddressBookModal(false)}
+                className="btn-ghost"
+                style={{ flex: 1 }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmAddToAddressBook}
+                className="btn-success"
+                style={{ flex: 1 }}
+                disabled={!addressBookLabel.trim()}
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+const modalOverlayStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(0, 0, 0, 0.5)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 1000,
+};
+
+const modalStyle: React.CSSProperties = {
+  background: "var(--surface-2)",
+  border: "1px solid var(--border)",
+  borderRadius: 12,
+  padding: "1.5rem",
+  maxWidth: 400,
+  width: "90%",
+};
