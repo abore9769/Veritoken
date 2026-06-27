@@ -1,16 +1,25 @@
 import { Networks, TransactionBuilder, rpc } from "@stellar/stellar-sdk";
+import { useNetworkStore, getNetworkRpcUrl } from "./networkStore";
 
-export const NETWORK = (import.meta.env.VITE_STELLAR_NETWORK as string) ?? "testnet";
+export const getNetwork = () => useNetworkStore.getState().network;
 
-export const RPC_URL =
-  NETWORK === "mainnet"
-    ? "https://mainnet.sorobanrpc.com"
-    : "https://soroban-testnet.stellar.org";
+export const getRpcUrl = () => {
+  const network = getNetwork();
+  return getNetworkRpcUrl(network);
+};
 
-export const NETWORK_PASSPHRASE =
-  NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
+export const getNetworkPassphrase = () => {
+  const network = getNetwork();
+  return network === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
+};
 
-export const server = new rpc.Server(RPC_URL, { allowHttp: false });
+export const getServer = () => new rpc.Server(getRpcUrl(), { allowHttp: false });
+
+// For backwards compatibility, export these as functions that return the current values
+export const NETWORK = getNetwork();
+export const RPC_URL = getRpcUrl();
+export const NETWORK_PASSPHRASE = getNetworkPassphrase();
+export const server = getServer();
 
 export const CONTRACT_IDS = {
   kycRegistry: import.meta.env.VITE_KYC_REGISTRY_ID ?? "",
@@ -18,6 +27,7 @@ export const CONTRACT_IDS = {
   invoiceToken: import.meta.env.VITE_INVOICE_TOKEN_ID ?? "",
   propertyToken: import.meta.env.VITE_PROPERTY_TOKEN_ID ?? "",
   carbonToken: import.meta.env.VITE_CARBON_TOKEN_ID ?? "",
+  rwaToken: import.meta.env.VITE_RWA_TOKEN_ID ?? "",
 };
 
 // Error code tables matching each contract's #[contracterror] enum discriminants.
@@ -99,7 +109,7 @@ const ERROR_TABLES: Record<ContractType, Record<number, string>> = {
  */
 export function decodeContractError(
   contractType: ContractType,
-  code: number
+  code: number,
 ): string {
   return (
     ERROR_TABLES[contractType]?.[code] ??
@@ -109,10 +119,10 @@ export function decodeContractError(
 
 export async function simulateAndSend(
   xdr: string,
-  signTx: (xdr: string) => Promise<string>
+  signTx: (xdr: string) => Promise<string>,
 ): Promise<rpc.Api.GetSuccessfulTransactionResponse> {
   const simResult = await server.simulateTransaction(
-    TransactionBuilder.fromXDR(xdr, NETWORK_PASSPHRASE)
+    TransactionBuilder.fromXDR(xdr, NETWORK_PASSPHRASE),
   );
 
   if (rpc.Api.isSimulationError(simResult)) {
@@ -129,18 +139,20 @@ export async function simulateAndSend(
   const prepared = rpc
     .assembleTransaction(
       TransactionBuilder.fromXDR(xdr, NETWORK_PASSPHRASE),
-      simResult
+      simResult,
     )
     .build()
     .toXDR();
 
   const signed = await signTx(prepared);
   const result = await server.sendTransaction(
-    TransactionBuilder.fromXDR(signed, NETWORK_PASSPHRASE)
+    TransactionBuilder.fromXDR(signed, NETWORK_PASSPHRASE),
   );
 
   if (result.status === "ERROR") {
-    throw new Error(`Transaction failed: ${JSON.stringify(result.errorResult)}`);
+    throw new Error(
+      `Transaction failed: ${JSON.stringify(result.errorResult)}`,
+    );
   }
 
   // Poll for confirmation
@@ -155,4 +167,17 @@ export async function simulateAndSend(
   }
 
   return getResult as rpc.Api.GetSuccessfulTransactionResponse;
+}
+
+/**
+ * Fetch contract events for a given contract ID.
+ * Returns a stub implementation for now.
+ */
+export async function fetchContractEvents(
+  _contractId: string,
+  _limit: number = 10,
+): Promise<any[]> {
+  // Stub implementation - returns empty array
+  // In a real implementation, this would query the blockchain for contract events
+  return [];
 }
