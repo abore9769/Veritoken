@@ -183,6 +183,38 @@ fn test_retire_records_receipt() {
 }
 
 #[test]
+fn test_retire_blocked_when_paused() {
+    let h = setup();
+    let alice = Address::generate(&h.env);
+    h.approve_kyc(&alice);
+    h.token.mint(&alice, &100);
+
+    // Pausing the compliance engine must freeze all token operations, including
+    // retirements (burns).
+    h.compliance.pause();
+    assert!(h
+        .token
+        .try_retire(
+            &alice,
+            &10,
+            &String::from_str(&h.env, "Acme Corp 2024 offset"),
+            &String::from_str(&h.env, "annual net-zero pledge"),
+        )
+        .is_err());
+
+    // After unpausing, the retirement goes through.
+    h.compliance.unpause();
+    let receipt = h.token.retire(
+        &alice,
+        &10,
+        &String::from_str(&h.env, "Acme Corp 2024 offset"),
+        &String::from_str(&h.env, "annual net-zero pledge"),
+    );
+    assert_eq!(receipt.amount, 10);
+    assert_eq!(h.token.balance(&alice), 90);
+}
+
+#[test]
 fn test_retire_insufficient_balance() {
     let h = setup();
     let alice = Address::generate(&h.env);
@@ -282,7 +314,7 @@ fn test_update_compliance_engine_admin_only() {
     // Deploy a second compliance engine and pause it
     let ce2_id = h.env.register(ComplianceEngine, ());
     let ce2 = ComplianceEngineClient::new(&h.env, &ce2_id);
-    ce2.initialize(&h.admin);
+    ce2.initialize(&h.admin, &h.kyc.address);
     ce2.pause();
 
     // Admin can update
@@ -307,7 +339,7 @@ fn test_update_compliance_engine_affects_transfers() {
     // Deploy and switch to a paused engine
     let ce2_id = h.env.register(ComplianceEngine, ());
     let ce2 = ComplianceEngineClient::new(&h.env, &ce2_id);
-    ce2.initialize(&h.admin);
+    ce2.initialize(&h.admin, &h.kyc.address);
     ce2.pause();
 
     h.token.update_compliance_engine(&ce2_id);

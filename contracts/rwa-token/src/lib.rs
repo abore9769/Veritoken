@@ -220,6 +220,13 @@ impl RwaToken {
         admin.require_auth();
         kyc::require_kyc(&env, &to);
         let previous_balance = balance::read_balance(&env, to.clone());
+        // A mint that introduces a brand-new holder must satisfy the compliance
+        // engine (e.g. the max_holders cap, pause, blocklist), mirroring the
+        // transfer path. Without this, register_holder could push the holder
+        // count past max_holders.
+        if amount > 0 && previous_balance == 0 {
+            compliance::check_transfer(&env, &to, &to, amount);
+        }
         balance::receive_balance(&env, to.clone(), amount);
         if amount > 0 && previous_balance == 0 {
             compliance::register_holder(&env, &to);
