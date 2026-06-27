@@ -3,7 +3,10 @@
 use crate::{PropertyMeta, PropertyToken, PropertyTokenClient};
 use compliance_engine::{ComplianceEngine, ComplianceEngineClient};
 use kyc_registry::{KycRegistry, KycRegistryClient};
-use soroban_sdk::{testutils::Address as _, Address, Env, String};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger as _},
+    Address, Env, String,
+};
 
 struct Harness {
     env: Env,
@@ -11,6 +14,7 @@ struct Harness {
     kyc: KycRegistryClient<'static>,
     compliance: ComplianceEngineClient<'static>,
     verifier: Address,
+    admin: Address,
 }
 
 fn meta(env: &Env) -> PropertyMeta {
@@ -60,6 +64,7 @@ fn setup() -> Harness {
         kyc,
         compliance,
         verifier,
+        admin,
     }
 }
 
@@ -159,6 +164,16 @@ fn test_dividend_distribution() {
     h.token.deposit_dividend(&1_000);
     assert_eq!(h.token.pending_dividend(&alice), 100);
 
+    // Assert that the "div_dep" event was emitted
+    let events = h.env.events().all();
+    let div_dep_topic = soroban_sdk::symbol_short!("div_dep").into_val(&h.env);
+    assert!(
+        events
+            .iter()
+            .any(|(_, topics, _)| topics.first() == Some(&div_dep_topic)),
+        "div_dep event should have been emitted"
+    );
+
     let claimed = h.token.claim_dividend(&alice);
     assert_eq!(claimed, 100);
     assert_eq!(h.token.pending_dividend(&alice), 0);
@@ -214,24 +229,71 @@ fn test_transfer_snapshots_dividends() {
     assert_eq!(h.token.pending_dividend(&alice), 0);
 }
 
+// ── update_kyc_registry / update_compliance_engine tests ─────────────────────
+
 #[test]
-fn test_two_step_admin_transfer() {
+fn test_update_kyc_registry_admin_only() {
     let h = setup();
-    let new_admin = Address::generate(&h.env);
+    let new_kyc = Address::generate(&h.env);
 
-    h.token.propose_admin(&new_admin);
-    h.token.accept_admin();
+    // Non-admin: separate env, no auths mocked
+    {
+        let env2 = Env::default();
+        let non_admin = Address::generate(&env2);
+        let token_id2 = env2.register(
+            PropertyToken,
+            (
+                non_admin.clone(),
+                Address::generate(&env2),
+                Address::generate(&env2),
+                meta(&env2),
+            ),
+        );
+        let client2 = PropertyTokenClient::new(&env2, &token_id2);
+        assert!(client2.try_update_kyc_registry(&Address::generate(&env2)).is_err());
+    }
 
-    // Verify new admin is set by calling mint (admin-only)
+    // Admin succeeds
+    h.token.update_kyc_registry(&new_kyc);
+
+    // Minting now fails because the new registry has no approvals
     let alice = Address::generate(&h.env);
-    h.approve_kyc(&alice);
-    h.token.mint(&alice, &100);
-    assert_eq!(h.token.balance(&alice), 100);
+    h.approve_kyc(&alice); // approved in OLD registry only
+    assert!(h.token.try_mint(&alice, &10).is_err());
 }
 
 #[test]
-fn test_accept_admin_fails_when_no_pending() {
+fn test_update_compliance_engine_admin_only() {
     let h = setup();
-    let res = h.token.try_accept_admin();
-    assert!(res.is_err());
+
+    // Non-admin: separate env, no auths mocked
+    {
+        let env2 = Env::default();
+        let non_admin = Address::generate(&env2);
+        let token_id2 = env2.register(
+            PropertyToken,
+            (
+                non_admin.clone(),
+                Address::generate(&env2),
+                Address::generate(&env2),
+                meta(&env2),
+            ),
+        );
+        let client2 = PropertyTokenClient::new(&env2, &token_id2);
+        assert!(client2.try_update_compliance_engine(&Address::generate(&env2)).is_err());
+    }
+
+    // Deploy a second compliance engine and pause it
+    let ce2_id = h.env.register(ComplianceEngine, ());
+    let ce2 = ComplianceEngineClient::new(&h.env, &ce2_id);
+    ce2.initialize(&h.admin);
+    ce2.pause();
+
+    // Admin can update
+    h.token.update_compliance_engine(&ce2_id);
+
+    // Mints through the paused engine are now blocked
+    let alice = Address::generate(&h.env);
+    h.approve_kyc(&alice);
+    assert!(h.token.try_mint(&alice, &10).is_err());
 }

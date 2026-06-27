@@ -1,6 +1,10 @@
 #![no_std]
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 
-use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, String, Symbol};
+use soroban_sdk::{
+    contract, contractimpl, contracterror, panic_with_error, symbol_short, Address, Env, String,
+    Symbol,
+};
 
 mod admin;
 mod allowance;
@@ -12,6 +16,18 @@ mod storage_types;
 
 #[cfg(test)]
 mod test;
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum RwaError {
+    AlreadyInitialized = 1,
+    KycNotApproved = 2,
+    TransferBlocked = 3,
+    InsufficientBalance = 4,
+    AllowanceExpired = 5,
+    InsufficientAllowance = 6,
+}
 
 #[contract]
 pub struct RwaToken;
@@ -42,7 +58,7 @@ impl RwaToken {
     /// Legacy entry point — always panics to prevent post-deploy initialization.
     #[allow(clippy::too_many_arguments)]
     pub fn initialize(
-        _env: Env,
+        env: Env,
         _admin: Address,
         _decimal: u32,
         _name: String,
@@ -51,7 +67,7 @@ impl RwaToken {
         _kyc_registry: Address,
         _compliance_engine: Address,
     ) {
-        panic!("already initialized");
+        panic_with_error!(env, RwaError::AlreadyInitialized);
     }
 
     // ── Admin ────────────────────────────────────────────────────────────────
@@ -65,22 +81,20 @@ impl RwaToken {
             .publish((symbol_short!("admin"),), (admin, new_admin));
     }
 
-    pub fn propose_admin(env: Env, new_admin: Address) {
+    pub fn update_kyc_registry(env: Env, new_registry: Address) {
         let admin = admin::read_admin(&env);
         admin.require_auth();
-        admin::write_pending_admin(&env, &new_admin);
+        kyc::write_kyc_registry(&env, &new_registry);
         env.events()
-            .publish((symbol_short!("proposed"),), new_admin);
+            .publish((symbol_short!("upd_kyc"),), new_registry);
     }
 
-    pub fn accept_admin(env: Env) {
-        let pending = admin::read_pending_admin(&env).expect("no pending admin");
-        pending.require_auth();
-        let old_admin = admin::read_admin(&env);
-        admin::write_admin(&env, &pending);
-        admin::remove_pending_admin(&env);
+    pub fn update_compliance_engine(env: Env, new_engine: Address) {
+        let admin = admin::read_admin(&env);
+        admin.require_auth();
+        compliance::write_compliance_engine(&env, &new_engine);
         env.events()
-            .publish((symbol_short!("admin_set"),), (old_admin, pending));
+            .publish((symbol_short!("upd_ce"),), new_engine);
     }
 
     // ── SEP-41 Token Interface ───────────────────────────────────────────────
@@ -212,7 +226,6 @@ impl RwaToken {
         }
         let supply = balance::read_total_supply(&env);
         balance::write_total_supply(&env, supply + amount);
-        compliance::register_holder(&env, &to);
         env.events().publish((symbol_short!("mint"), to), amount);
     }
 

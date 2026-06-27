@@ -3,8 +3,9 @@
 use crate::{RwaToken, RwaTokenClient};
 use compliance_engine::{ComplianceEngine, ComplianceEngineClient, ComplianceRules};
 use kyc_registry::{KycRegistry, KycRegistryClient};
-use soroban_sdk::{testutils::{Address as _, Ledger as _}, Address, Env, String};
+use soroban_sdk::{testutils::Address as _, Address, Env, String};
 
+#[allow(dead_code)]
 struct Harness {
     env: Env,
     token: RwaTokenClient<'static>,
@@ -107,6 +108,16 @@ fn test_transfer_happy_path() {
 
     assert_eq!(h.token.balance(&alice), 600);
     assert_eq!(h.token.balance(&bob), 400);
+
+    // Assert that a "transfer" event was emitted
+    let events = h.env.events().all();
+    let transfer_topic = soroban_sdk::symbol_short!("transfer").into_val(&h.env);
+    assert!(
+        events
+            .iter()
+            .any(|(_, topics, _)| topics.first() == Some(&transfer_topic)),
+        "transfer event should have been emitted"
+    );
 }
 
 #[test]
@@ -272,25 +283,15 @@ fn test_non_deployer_cannot_reinitialize() {
 }
 
 #[test]
-fn test_two_step_admin_transfer() {
+fn test_mint_twice_same_address_holder_count_is_one() {
     let h = setup();
-    let new_admin = Address::generate(&h.env);
+    let user = Address::generate(&h.env);
+    h.approve_kyc(&user);
 
-    h.token.propose_admin(&new_admin);
-    h.token.accept_admin();
+    h.token.mint(&user, &1_000);
+    h.token.mint(&user, &500);
 
-    // Verify new admin is set by calling set_compliance_metadata (admin-only)
-    let key = soroban_sdk::symbol_short!("legal");
-    h.token.set_compliance_metadata(&key, &String::from_str(&h.env, "prospectus-v2"));
-    assert_eq!(
-        h.token.get_compliance_metadata(&key),
-        String::from_str(&h.env, "prospectus-v2")
-    );
-}
-
-#[test]
-fn test_accept_admin_fails_when_no_pending() {
-    let h = setup();
-    let res = h.token.try_accept_admin();
-    assert!(res.is_err());
+    assert_eq!(h.compliance.holder_count(), 1);
+    assert_eq!(h.token.balance(&user), 1_500);
+    assert_eq!(h.token.total_supply(), 1_500);
 }
