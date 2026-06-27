@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useWallet } from "../lib/wallet";
 import { contracts } from "../lib/contracts";
 import { CONTRACT_IDS, fetchContractEvents } from "../lib/stellar";
-import { PageHeader, Card, Field, Icon } from "../components/ui";
+import { PageHeader, Card, Field, Icon, Skeleton } from "../components/ui";
 import WalletGuard from "../components/WalletGuard";
 import { useToast } from "../lib/toast";
 import type { RetirementReceipt, ContractEvent } from "../types";
@@ -235,10 +235,25 @@ export default function CarbonPage() {
               {receiptsLoading ? <><Spinner />Loading…</> : "Refresh"}
             </button>
           </div>
-          {receipts.length === 0 && !receiptsLoading && (
+          {receiptsLoading ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              {[1, 2, 3].map((i) => (
+                <div key={i} style={{ display: "flex", gap: "0.5rem", padding: "0.65rem 0", borderBottom: "1px solid var(--border)" }}>
+                  <Skeleton width="30px" height="1.25rem" />
+                  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                    <Skeleton width="200px" height="1.25rem" />
+                    <Skeleton width="300px" height="0.875rem" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : receipts.length === 0 ? (
             <p className="muted" style={{ fontSize: "0.85rem", margin: "1rem 0" }}>No receipts loaded. Connect your wallet and click Refresh.</p>
+          ) : (
+            <>
+              {receipts.map((r, i) => <ReceiptCard key={page * PAGE_SIZE + i} receipt={r} index={page * PAGE_SIZE + i} />)}
+            </>
           )}
-          {receipts.map((r, i) => <ReceiptCard key={page * PAGE_SIZE + i} receipt={r} index={page * PAGE_SIZE + i} />)}
           {totalPages !== null && totalPages > 1 && (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "1rem" }}>
               <button className="btn-ghost" onClick={() => loadReceipts(page - 1)} disabled={page === 0 || receiptsLoading}>← Prev</button>
@@ -246,8 +261,6 @@ export default function CarbonPage() {
               <button className="btn-ghost" onClick={() => loadReceipts(page + 1)} disabled={page >= totalPages - 1 || receiptsLoading}>Next →</button>
             </div>
           )}
-        </Card>
-      )}
 
       <RecentTransactions events={events} loading={eventsLoading} />
     </div>

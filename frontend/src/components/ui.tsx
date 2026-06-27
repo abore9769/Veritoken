@@ -236,3 +236,28 @@ export function Select({
     </div>
   );
 }
+
+/* ── Skeleton loader ────────────────────────────────────────────────────── */
+
+export function Skeleton({
+  width = "100%",
+  height = "1rem",
+  className,
+}: {
+  width?: string;
+  height?: string;
+  className?: string;
+}) {
+  return (
+    <div
+      className={className}
+      style={{
+        width,
+        height,
+        background: "var(--surface-2)",
+        borderRadius: "0.5rem",
+        animation: "pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite",
+      }}
+    />
+  );
+}
