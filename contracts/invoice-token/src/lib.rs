@@ -44,6 +44,7 @@ pub enum DataKey {
     Allowance(Address, Address),
     TotalSupply,
     Settled,
+    SettlementAmount,
 }
 
 #[contracttype]
@@ -219,15 +220,49 @@ impl InvoiceToken {
         env.events().publish((symbol_short!("issued"), to), amount);
     }
 
-    /// Mark invoice as settled and enable redemption burns.
+    /// Mark invoice as fully settled; equivalent to partial_settle(face_value_usd).
     pub fn settle(env: Env) {
         env.storage().instance().extend_ttl(THRESHOLD, BUMP);
         Self::require_admin(&env);
+        let meta: InvoiceMeta = env.storage().instance().get(&DataKey::InvoiceMeta).unwrap();
         env.storage().instance().set(&DataKey::Settled, &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::SettlementAmount, &meta.face_value_usd);
         env.events().publish((symbol_short!("settled"),), ());
     }
 
+    /// Mark invoice as partially settled with the given payment amount.
+    /// Enables proportional redemption: each holder may redeem up to
+    /// `balance * settlement_amount / total_supply` tokens.
+    pub fn partial_settle(env: Env, settlement_amount: i128) {
+        env.storage().instance().extend_ttl(THRESHOLD, BUMP);
+        Self::require_admin(&env);
+        if settlement_amount <= 0 {
+            panic!("settlement_amount must be positive");
+        }
+        let meta: InvoiceMeta = env.storage().instance().get(&DataKey::InvoiceMeta).unwrap();
+        if settlement_amount > meta.face_value_usd {
+            panic!("settlement_amount exceeds face value");
+        }
+        env.storage().instance().set(&DataKey::Settled, &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::SettlementAmount, &settlement_amount);
+        env.events()
+            .publish((symbol_short!("p_settld"),), settlement_amount);
+    }
+
+    pub fn settlement_amount(env: Env) -> i128 {
+        env.storage().instance().extend_ttl(THRESHOLD, BUMP);
+        env.storage()
+            .instance()
+            .get(&DataKey::SettlementAmount)
+            .unwrap_or(0)
+    }
+
     /// Burn tokens upon settlement / redemption.
+    /// Redemption is limited to the holder's proportional share of the settled amount.
     pub fn redeem(env: Env, from: Address, amount: i128) {
         env.storage().instance().extend_ttl(THRESHOLD, BUMP);
         from.require_auth();
@@ -243,6 +278,24 @@ impl InvoiceToken {
         let bal = Self::read_balance(&env, from.clone());
         if bal < amount {
             panic_with_error!(env, InvoiceError::InsufficientBalance);
+        }
+        let settlement: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::SettlementAmount)
+            .unwrap_or(0);
+        if settlement > 0 {
+            let total_supply: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::TotalSupply)
+                .unwrap_or(0);
+            if total_supply > 0 {
+                let max_redeemable = bal * settlement / total_supply;
+                if amount > max_redeemable {
+                    panic!("exceeds proportional settlement");
+                }
+            }
         }
         env.storage()
             .persistent()
@@ -497,6 +550,10 @@ impl InvoiceToken {
             .instance()
             .get(&DataKey::Settled)
             .unwrap_or(false)
+    }
+
+    pub fn version(env: Env) -> String {
+        String::from_str(&env, env!("CARGO_PKG_VERSION"))
     }
 
     // ── Internals ────────────────────────────────────────────────────────────

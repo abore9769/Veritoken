@@ -415,3 +415,10 @@ fn test_invalid_asset_type() {
         ),
     );
 }
+
+#[test]
+fn test_version_returns_nonempty() {
+    let h = setup();
+    let v = h.token.version();
+    assert!(v.len() > 0);
+}

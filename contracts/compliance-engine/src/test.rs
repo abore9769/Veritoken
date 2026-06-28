@@ -328,3 +328,10 @@ fn test_require_same_jurisdiction_blocks_cross_jurisdiction_transfer() {
     kyc.approve(&verifier, &carol, &1, &0, &String::from_str(&env, "US"));
     assert!(ce.can_transfer(&alice, &carol, &100));
 }
+
+#[test]
+fn test_version_returns_nonempty() {
+    let (_, client, _) = setup();
+    let v = client.version();
+    assert!(v.len() > 0);
+}
