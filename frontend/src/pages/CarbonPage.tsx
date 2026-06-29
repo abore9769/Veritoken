@@ -1,45 +1,280 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useWallet } from "../lib/wallet";
-import { CONTRACT_IDS } from "../lib/stellar";
-import { PageHeader, Card, Field, Select, Icon } from "../components/ui";
+import { contracts } from "../lib/contracts";
+import { CONTRACT_IDS, fetchContractEvents } from "../lib/stellar";
+import { useAddressValidation } from "../lib/useAddressValidation";
+import { useAmountValidation } from "../lib/validation";
+import { PageHeader, Card, Field, Icon } from "../components/ui";
+import WalletGuard from "../components/WalletGuard";
+import { useToast } from "../lib/toast";
+import type { RetirementReceipt, ContractEvent } from "../types";
+
+const PAGE_SIZE = 10;
+
+function Spinner() {
+  return (
+    <span
+      role="status"
+      aria-label="Loading"
+      style={{
+        display: "inline-block",
+        width: 16,
+        height: 16,
+        border: "2px solid currentColor",
+        borderTopColor: "transparent",
+        borderRadius: "50%",
+        animation: "spin 0.7s linear infinite",
+        verticalAlign: "middle",
+        marginRight: 6,
+      }}
+    />
+  );
+}
+
+function ReceiptCard({
+  receipt,
+  index,
+  highlight = false,
+}: {
+  receipt: RetirementReceipt;
+  index: number;
+  highlight?: boolean;
+}) {
+  const amount =
+    typeof receipt.amount === "bigint"
+      ? Number(receipt.amount)
+      : (receipt.amount as number);
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: "0.75rem",
+        padding: "0.65rem 0",
+        borderBottom: "1px solid var(--border)",
+        background: highlight ? "var(--accent-soft)" : undefined,
+        borderRadius: highlight ? 8 : undefined,
+        paddingLeft: highlight ? "0.5rem" : undefined,
+      }}
+    >
+      <div
+        style={{
+          minWidth: 36,
+          color: "var(--muted)",
+          fontSize: "0.8rem",
+          paddingTop: 2,
+        }}
+      >
+        #{index}
+      </div>
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          gap: "0.15rem",
+        }}
+      >
+        <div style={{ fontWeight: 500 }}>
+          {amount.toLocaleString()} tCO₂e
+          {receipt.beneficiary ? ` — ${receipt.beneficiary}` : ""}
+        </div>
+        <div className="muted" style={{ fontSize: "0.78rem" }}>
+          {receipt.retiree} ·{" "}
+          {new Date(
+            (typeof receipt.timestamp === "bigint"
+              ? Number(receipt.timestamp)
+              : receipt.timestamp) * 1000,
+          ).toLocaleDateString()}
+        </div>
+        {receipt.retirement_reason && (
+          <div className="muted" style={{ fontSize: "0.78rem" }}>
+            {receipt.retirement_reason}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function CarbonPage() {
-  const { connected } = useWallet();
-  const [tab, setTab] = useState<"issue" | "retire">("issue");
+  const { connected, address, signTx } = useWallet();
+  const { addToast } = useToast();
+  const [tab, setTab] = useState<"issue" | "retire" | "receipts">("issue");
 
-  const [issueForm, setIssueForm] = useState({
-    project_id: "",
-    standard: "VCS",
-    vintage_year: "2024",
-    project_name: "",
-    project_type: "forestry",
-    country: "",
-    verifier: "",
-    ipfs_cert_hash: "",
-    amount: "",
-  });
+  const [mintTo, setMintTo] = useState("");
+  const [mintAmount, setMintAmount] = useState("");
+  const [mintLoading, setMintLoading] = useState(false);
 
-  const [retireForm, setRetireForm] = useState({ amount: "", beneficiary: "", reason: "" });
+  const [transferTo, setTransferTo] = useState("");
+  const [transferAmount, setTransferAmount] = useState("");
+  const [transferLoading, setTransferLoading] = useState(false);
 
-  const issue = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setIssueForm((f) => ({ ...f, [k]: e.target.value }));
-  const retire = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setRetireForm((f) => ({ ...f, [k]: e.target.value }));
+  const [retireAmount, setRetireAmount] = useState("");
+  const [retireBeneficiary, setRetireBeneficiary] = useState("");
+  const [retireReason, setRetireReason] = useState("");
+  const [retireLoading, setRetireLoading] = useState(false);
+  const [lastReceipt, setLastReceipt] = useState<RetirementReceipt | null>(
+    null,
+  );
 
-  const handleIssue = async (e: React.FormEvent) => {
+  const [receipts, setReceipts] = useState<RetirementReceipt[]>([]);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
+  const [page, setPage] = useState(0);
+  const [receiptsLoading, setReceiptsLoading] = useState(false);
+
+  const [events, setEvents] = useState<ContractEvent[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+
+  // Address validations
+  const mintToValidation = useAddressValidation(mintTo);
+  const transferToValidation = useAddressValidation(transferTo);
+
+  // Amount validations
+  const mintAmountValidation = useAmountValidation(mintAmount);
+  const transferAmountValidation = useAmountValidation(transferAmount);
+  const retireAmountValidation = useAmountValidation(retireAmount);
+
+  useEffect(() => {
+    if (!CONTRACT_IDS.carbonToken) return;
+    setEventsLoading(true);
+    fetchContractEvents(CONTRACT_IDS.carbonToken, 10)
+      .then(setEvents)
+      .catch(() => {})
+      .finally(() => setEventsLoading(false));
+  }, []);
+
+  const handleMint = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!connected) return alert("Connect wallet first");
-    alert(`Would mint ${issueForm.amount} carbon credits on ${CONTRACT_IDS.carbonToken || "<not configured>"}`);
+    if (!connected || !address) return;
+    if (mintTo && !mintToValidation.isValid) {
+      addToast("Please enter a valid Stellar address for recipient", "error");
+      return;
+    }
+    if (!mintAmountValidation.isValid) {
+      addToast(mintAmountValidation.error || "Invalid amount", "error");
+      return;
+    }
+    setMintLoading(true);
+    try {
+      await contracts.carbonToken.mint(
+        mintTo || address,
+        BigInt(mintAmount),
+        signTx,
+      );
+      addToast("Credits issued successfully.", "success");
+      setMintAmount("");
+      setMintTo("");
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : String(err), "error");
+    } finally {
+      setMintLoading(false);
+    }
+  };
+
+  const handleTransfer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!connected || !address) return;
+    if (!transferToValidation.isValid) {
+      addToast("Please enter a valid Stellar address for recipient", "error");
+      return;
+    }
+    if (!transferAmountValidation.isValid) {
+      addToast(transferAmountValidation.error || "Invalid amount", "error");
+      return;
+    }
+    setTransferLoading(true);
+    try {
+      await contracts.carbonToken.transfer(
+        address,
+        transferTo,
+        BigInt(transferAmount),
+        signTx,
+      );
+      addToast("Transfer sent successfully.", "success");
+      setTransferAmount("");
+      setTransferTo("");
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : String(err), "error");
+    } finally {
+      setTransferLoading(false);
+    }
   };
 
   const handleRetire = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!connected) return alert("Connect wallet first");
-    alert(`Would retire ${retireForm.amount} credits for "${retireForm.beneficiary}"`);
+    if (!connected || !address) return;
+    if (!retireAmountValidation.isValid) {
+      addToast(retireAmountValidation.error || "Invalid amount", "error");
+      return;
+    }
+    setRetireLoading(true);
+    setLastReceipt(null);
+    try {
+      const receipt = await contracts.carbonToken.retire(
+        address,
+        BigInt(retireAmount),
+        retireBeneficiary,
+        retireReason,
+        signTx,
+      );
+      setLastReceipt(receipt);
+      addToast("Credits retired successfully.", "success");
+      setRetireAmount("");
+      setRetireBeneficiary("");
+      setRetireReason("");
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : String(err), "error");
+    } finally {
+      setRetireLoading(false);
+    }
   };
+
+  const loadReceipts = async (targetPage: number) => {
+    if (!address) {
+      addToast("Connect your wallet to load receipts.", "info");
+      return;
+    }
+    setReceiptsLoading(true);
+    try {
+      const count = await contracts.carbonToken.retirementCount(address);
+      setTotalCount(count);
+      const fetched = await contracts.carbonToken.getReceipts(
+        targetPage * PAGE_SIZE,
+        PAGE_SIZE,
+        address,
+      );
+      setReceipts(fetched);
+      setPage(targetPage);
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : String(err), "error");
+    } finally {
+      setReceiptsLoading(false);
+    }
+  };
+
+  const handleTabReceipts = () => {
+    setTab("receipts");
+    if (receipts.length === 0 && totalCount === null) loadReceipts(0);
+  };
+
+  const totalPages =
+    totalCount !== null ? Math.ceil(totalCount / PAGE_SIZE) : null;
+
+  // Check validation errors for button disabling
+  const hasMintAddressError = mintTo.length > 0 && !mintToValidation.isValid;
+  const hasMintAmountError =
+    mintAmount.length > 0 && !mintAmountValidation.isValid;
+  const hasTransferAddressError =
+    !transferToValidation.isValid && transferTo.length > 0;
+  const hasTransferAmountError =
+    transferAmount.length > 0 && !transferAmountValidation.isValid;
+  const hasRetireAmountError =
+    retireAmount.length > 0 && !retireAmountValidation.isValid;
 
   return (
     <div className="form-narrow">
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+
       <PageHeader
         eyebrow="Asset Module"
         icon={<Icon.carbon size={22} />}
@@ -62,57 +297,347 @@ export default function CarbonPage() {
         >
           Retire Credits
         </button>
+        <button
+          onClick={handleTabReceipts}
+          className={tab === "receipts" ? "" : "btn-ghost"}
+          style={styles.tab}
+        >
+          Receipts
+        </button>
       </div>
 
-      {tab === "issue" ? (
+      {tab === "issue" && (
+        <WalletGuard>
+          <Card>
+            <form onSubmit={handleMint}>
+              <Field
+                label="Recipient Address"
+                value={mintTo}
+                onChange={(e) => setMintTo(e.target.value)}
+                placeholder={address ?? "G…"}
+                error={mintToValidation.error}
+              />
+              <Field
+                label="Credits to Mint (tonnes CO₂e)"
+                type="number"
+                value={mintAmount}
+                onChange={(e) => setMintAmount(e.target.value)}
+                required
+                error={mintAmountValidation.error}
+              />
+              <button
+                type="submit"
+                className="btn-block"
+                style={{ marginTop: "0.75rem" }}
+                disabled={
+                  mintLoading || hasMintAddressError || hasMintAmountError
+                }
+              >
+                {mintLoading && <Spinner />}
+                {mintLoading ? "Issuing…" : "Issue Carbon Credits"}
+              </button>
+            </form>
+            <hr style={{ margin: "1.5rem 0", borderColor: "var(--border)" }} />
+            <h3
+              style={{
+                fontSize: "0.95rem",
+                fontWeight: 700,
+                marginBottom: "0.75rem",
+              }}
+            >
+              Transfer Credits
+            </h3>
+            <form onSubmit={handleTransfer}>
+              <Field
+                label="Recipient Address"
+                value={transferTo}
+                onChange={(e) => setTransferTo(e.target.value)}
+                placeholder="G…"
+                required
+                error={transferToValidation.error}
+              />
+              <Field
+                label="Amount (tonnes CO₂e)"
+                type="number"
+                value={transferAmount}
+                onChange={(e) => setTransferAmount(e.target.value)}
+                required
+                error={transferAmountValidation.error}
+              />
+              <button
+                type="submit"
+                className="btn-block btn-ghost"
+                style={{ marginTop: "0.75rem" }}
+                disabled={
+                  transferLoading ||
+                  hasTransferAddressError ||
+                  hasTransferAmountError
+                }
+              >
+                {transferLoading && <Spinner />}
+                {transferLoading ? "Transferring…" : "Transfer Credits"}
+              </button>
+            </form>
+          </Card>
+        </WalletGuard>
+      )}
+
+      {tab === "retire" && (
+        <WalletGuard>
+          <Card>
+            <form onSubmit={handleRetire}>
+              <Field
+                label="Amount to Retire (tonnes CO₂e)"
+                type="number"
+                value={retireAmount}
+                onChange={(e) => setRetireAmount(e.target.value)}
+                required
+                error={retireAmountValidation.error}
+              />
+              <Field
+                label="Beneficiary Name"
+                value={retireBeneficiary}
+                onChange={(e) => setRetireBeneficiary(e.target.value)}
+                placeholder="Acme Corp 2024 offset"
+              />
+              <Field
+                label="Retirement Reason"
+                value={retireReason}
+                onChange={(e) => setRetireReason(e.target.value)}
+                placeholder="Annual Scope 1 offset"
+              />
+              <p
+                className="muted"
+                style={{ fontSize: "0.78rem", margin: "0.25rem 0 0.9rem" }}
+              >
+                Retirement is permanent — credits are burned and cannot be
+                re-issued.
+              </p>
+              <button
+                type="submit"
+                className="btn-success btn-block"
+                disabled={retireLoading || hasRetireAmountError}
+              >
+                {retireLoading && <Spinner />}
+                {retireLoading ? "Retiring…" : "Retire Credits (Permanent)"}
+              </button>
+            </form>
+            {lastReceipt && (
+              <div
+                style={{
+                  marginTop: "1.25rem",
+                  padding: "1rem",
+                  borderRadius: 12,
+                  background: "var(--accent-soft)",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                <div
+                  style={{
+                    fontWeight: 700,
+                    marginBottom: "0.5rem",
+                    fontSize: "0.95rem",
+                  }}
+                >
+                  Retirement Receipt
+                </div>
+                <dl style={styles.receipt}>
+                  <dt>Retiree</dt>
+                  <dd style={styles.mono}>{lastReceipt.retiree}</dd>
+                  <dt>Amount</dt>
+                  <dd>
+                    {(typeof lastReceipt.amount === "bigint"
+                      ? Number(lastReceipt.amount)
+                      : lastReceipt.amount
+                    ).toLocaleString()}{" "}
+                    tCO₂e
+                  </dd>
+                  {lastReceipt.beneficiary && (
+                    <>
+                      <dt>Beneficiary</dt>
+                      <dd>{lastReceipt.beneficiary}</dd>
+                    </>
+                  )}
+                  {lastReceipt.retirement_reason && (
+                    <>
+                      <dt>Reason</dt>
+                      <dd>{lastReceipt.retirement_reason}</dd>
+                    </>
+                  )}
+                  <dt>Timestamp</dt>
+                  <dd>
+                    {new Date(
+                      (typeof lastReceipt.timestamp === "bigint"
+                        ? Number(lastReceipt.timestamp)
+                        : lastReceipt.timestamp) * 1000,
+                    ).toLocaleString()}
+                  </dd>
+                </dl>
+              </div>
+            )}
+          </Card>
+        </WalletGuard>
+      )}
+
+      {tab === "receipts" && (
         <Card>
-          <form onSubmit={handleIssue}>
-            <Field label="Project ID" value={issueForm.project_id} onChange={issue("project_id")} required />
-            <Select
-              label="Standard"
-              value={issueForm.standard}
-              onChange={issue("standard")}
-              options={["VCS", "Gold Standard", "CDM", "ACR"].map((s) => ({ value: s, label: s }))}
-            />
-            <Field label="Vintage Year" type="number" value={issueForm.vintage_year} onChange={issue("vintage_year")} required />
-            <Field label="Project Name" value={issueForm.project_name} onChange={issue("project_name")} required />
-            <Select
-              label="Project Type"
-              value={issueForm.project_type}
-              onChange={issue("project_type")}
-              options={[
-                { value: "forestry", label: "Forestry" },
-                { value: "renewable", label: "Renewable Energy" },
-                { value: "methane_capture", label: "Methane Capture" },
-              ]}
-            />
-            <Field label="Country" value={issueForm.country} onChange={issue("country")} required />
-            <Field label="Verifier" value={issueForm.verifier} onChange={issue("verifier")} required />
-            <Field label="IPFS Certificate Hash" value={issueForm.ipfs_cert_hash} onChange={issue("ipfs_cert_hash")} placeholder="bafyrei…" />
-            <Field label="Credits to Mint (tonnes CO₂e)" type="number" value={issueForm.amount} onChange={issue("amount")} required />
-            <button type="submit" className="btn-block" style={{ marginTop: "0.75rem" }}>
-              Issue Carbon Credits
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "0.75rem",
+            }}
+          >
+            <span style={{ fontWeight: 600 }}>
+              Retirement Receipts
+              {totalCount !== null && (
+                <span
+                  className="muted"
+                  style={{ fontWeight: 400, marginLeft: "0.4rem" }}
+                >
+                  ({totalCount} total)
+                </span>
+              )}
+            </span>
+            <button
+              className="btn-ghost"
+              style={{ fontSize: "0.8rem" }}
+              onClick={() => loadReceipts(page)}
+              disabled={receiptsLoading}
+            >
+              {receiptsLoading ? (
+                <>
+                  <Spinner />
+                  Loading…
+                </>
+              ) : (
+                "Refresh"
+              )}
             </button>
-          </form>
-        </Card>
-      ) : (
-        <Card>
-          <form onSubmit={handleRetire}>
-            <Field label="Amount to Retire (tonnes CO₂e)" type="number" value={retireForm.amount} onChange={retire("amount")} required />
-            <Field label="Beneficiary Name" value={retireForm.beneficiary} onChange={retire("beneficiary")} placeholder="Acme Corp 2024 offset" />
-            <Field label="Retirement Reason" value={retireForm.reason} onChange={retire("reason")} placeholder="Annual Scope 1 offset" />
-            <p className="muted" style={{ fontSize: "0.78rem", margin: "0.25rem 0 0.9rem" }}>
-              Retirement is permanent — credits are burned and cannot be re-issued.
+          </div>
+          {receipts.length === 0 && !receiptsLoading && (
+            <p
+              className="muted"
+              style={{ fontSize: "0.85rem", margin: "1rem 0" }}
+            >
+              No receipts loaded. Connect your wallet and click Refresh.
             </p>
-            <button type="submit" className="btn-success btn-block">
-              Retire Credits (Permanent)
-            </button>
-          </form>
+          )}
+          {receipts.map((r, i) => (
+            <ReceiptCard
+              key={page * PAGE_SIZE + i}
+              receipt={r}
+              index={page * PAGE_SIZE + i}
+            />
+          ))}
+          {totalPages !== null && totalPages > 1 && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginTop: "1rem",
+              }}
+            >
+              <button
+                className="btn-ghost"
+                onClick={() => loadReceipts(page - 1)}
+                disabled={page === 0 || receiptsLoading}
+              >
+                ← Prev
+              </button>
+              <span className="muted" style={{ fontSize: "0.85rem" }}>
+                Page {page + 1} / {totalPages}
+              </span>
+              <button
+                className="btn-ghost"
+                onClick={() => loadReceipts(page + 1)}
+                disabled={page >= totalPages - 1 || receiptsLoading}
+              >
+                Next →
+              </button>
+            </div>
+          )}
         </Card>
       )}
+
+      <RecentTransactions events={events} loading={eventsLoading} />
     </div>
   );
 }
+
+function RecentTransactions({
+  events,
+  loading,
+}: {
+  events: ContractEvent[];
+  loading: boolean;
+}) {
+  return (
+    <Card title="Recent Transactions" style={{ marginTop: "1.25rem" }}>
+      {loading ? (
+        <p className="muted" style={{ fontSize: "0.875rem" }}>
+          Loading…
+        </p>
+      ) : events.length === 0 ? (
+        <p className="muted" style={{ fontSize: "0.875rem" }}>
+          No recent events found.
+        </p>
+      ) : (
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            fontSize: "0.82rem",
+          }}
+        >
+          <thead>
+            <tr
+              style={{
+                borderBottom: "1px solid var(--border)",
+                textAlign: "left",
+              }}
+            >
+              <th style={th}>Type</th>
+              <th style={th}>Amount</th>
+              <th style={th}>Counterparty</th>
+              <th style={th}>Time</th>
+            </tr>
+          </thead>
+          <tbody>
+            {events.map((ev, i) => (
+              <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
+                <td style={td}>{ev.type}</td>
+                <td style={td}>{ev.amount}</td>
+                <td
+                  style={{
+                    ...td,
+                    fontFamily: "monospace",
+                    maxWidth: 140,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {ev.counterparty}
+                </td>
+                <td style={td}>{ev.timestamp}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Card>
+  );
+}
+
+const th: React.CSSProperties = {
+  padding: "0.4rem 0.5rem",
+  fontWeight: 600,
+  color: "var(--muted)",
+};
+const td: React.CSSProperties = { padding: "0.4rem 0.5rem" };
 
 const styles: Record<string, React.CSSProperties> = {
   tabs: {
@@ -125,4 +650,16 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 12,
   },
   tab: { boxShadow: "none" },
+  receipt: {
+    display: "grid",
+    gridTemplateColumns: "max-content 1fr",
+    gap: "0.25rem 0.75rem",
+    fontSize: "0.85rem",
+    margin: 0,
+  },
+  mono: {
+    fontFamily: "monospace",
+    fontSize: "0.75rem",
+    wordBreak: "break-all" as const,
+  },
 };

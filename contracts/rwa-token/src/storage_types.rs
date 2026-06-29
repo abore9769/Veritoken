@@ -11,6 +11,7 @@ pub(crate) const BALANCE_LIFETIME_THRESHOLD: u32 = BALANCE_BUMP_AMOUNT - DAY_IN_
 #[contracttype]
 pub enum DataKey {
     Admin,
+    PendingAdmin,
     TotalSupply,
     Metadata,
     AssetType,
@@ -19,6 +20,7 @@ pub enum DataKey {
     Balance(Address),
     Allowance(AllowanceKey),
     ComplianceMeta(Symbol),
+    Frozen(Address),
 }
 
 #[contracttype]
