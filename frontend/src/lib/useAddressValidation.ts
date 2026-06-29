@@ -1,4 +1,7 @@
-import { validateStellarAddress } from "./stellar";
+/** Validates a Stellar public key (G… address, 56 chars, base32). */
+function validateStellarAddress(value: string): boolean {
+  return /^G[A-Z2-7]{55}$/.test(value);
+}
 
 interface AddressValidationResult {
   isValid: boolean;
@@ -17,7 +20,6 @@ export function useAddressValidation(value: string): AddressValidationResult {
     return { isValid: true, error: null };
   }
 
-  // Check if it's a valid Stellar address
   const isValid = validateStellarAddress(value);
 
   if (!isValid) {

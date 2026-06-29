@@ -2,8 +2,6 @@ import { useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useWallet } from "../lib/wallet";
 import { useNetworkStore, type Network } from "../lib/networkStore";
-import { getNetworkRpcUrl, getNetworkPassphrase } from "../lib/stellar";
-import { Networks } from "@stellar/stellar-sdk";
 
 const NAV = [
   { to: "/", label: "Dashboard" },
@@ -19,6 +17,9 @@ export default function Layout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   const { address, connected, connect, disconnect } = useWallet();
   const { network, setNetwork } = useNetworkStore();
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const closeMenu = () => setMenuOpen(false);
 
   const handleNetworkChange = (newNetwork: Network) => {
     setNetwork(newNetwork);
